@@ -1,10 +1,14 @@
 {
-    "name": "quicktype",
-    "version": "23.2.0",
+    "name": "go-quicktype",
+    "version": "0.1.0",
     "license": "Apache-2.0",
+    "homepage": "https://eslider.github.io/go-quicktype/",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
-    "repository": "https://github.com/quicktype/quicktype",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/eSlider/go-quicktype.git"
+    },
     "engines": {
         "node": ">=18.12.0"
     },
@@ -16,13 +20,16 @@
         "clean": "rm -rf dist *~ packages/*/{dist,out}",
         "debug": "node --inspect-brk --max-old-space-size=4096 ./dist/index.js",
         "lint": "eslint src/** packages/*/src/**",
-        "lint:fix": "eslint --fix src/** packages/*/src/**"
+        "lint:fix": "eslint --fix src/** packages/*/src/**",
+        "dev:web": "npm run dev --workspace=packages/web",
+        "build:web": "npm run build --workspace=packages/quicktype-core && npm run build --workspace=packages/quicktype-graphql-input && npm run build --workspace=packages/web"
     },
     "workspaces": [
         "./packages/quicktype-core",
         "./packages/quicktype-graphql-input",
         "./packages/quicktype-typescript-input",
-        "./packages/quicktype-vscode"
+        "./packages/quicktype-vscode",
+        "./packages/web"
     ],
     "dependencies": {
         "@glideapps/ts-necessities": "^2.2.3",

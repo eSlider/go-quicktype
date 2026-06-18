@@ -1,11 +1,11 @@
 ![](https://raw.githubusercontent.com/quicktype/quicktype/master/media/quicktype-logo.svg?sanitize=true)
 
-[![npm version](https://badge.fury.io/js/quicktype.svg)](https://badge.fury.io/js/quicktype)
-![Build status](https://github.com/quicktype/quicktype/actions/workflows/master.yaml/badge.svg)
+> **Fork:** [eSlider/go-quicktype](https://github.com/eSlider/go-quicktype) ships a **backendless browser web app** at **[eslider.github.io/go-quicktype](https://eslider.github.io/go-quicktype/)** — all transformations run client-side. This repo also contains the quicktype engine and CLI (upstream fork).
 
 `quicktype` generates strongly-typed models and serializers from JSON, JSON Schema, TypeScript, and [GraphQL queries](https://blog.quicktype.io/graphql-with-quicktype/), making it a breeze to work with JSON type-safely in many programming languages.
 
--   [Try `quicktype` in your browser](https://app.quicktype.io).
+-   [**Try the browser app (this fork)**](https://eslider.github.io/go-quicktype/)
+-   [Try upstream quicktype](https://app.quicktype.io)
 -   Read ['A first look at quicktype'](http://blog.quicktype.io/first-look/) for more introduction.
 -   If you have any questions, check out the [FAQ](FAQ.md) first.
 

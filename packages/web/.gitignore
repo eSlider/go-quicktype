@@ -1,0 +1,3 @@
+dist/
+src/worker/quicktype.worker.bundle.js
+src/worker/quicktype.worker.bundle.js.map

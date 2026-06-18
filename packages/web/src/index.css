@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+@theme {
+    --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+html,
+body,
+#root {
+    height: 100%;
+}
+
+body {
+    font-family: var(--font-sans);
+}
+
+textarea,
+pre,
+code {
+    font-family: var(--font-mono);
+}

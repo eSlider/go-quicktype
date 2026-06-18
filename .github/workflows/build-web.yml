@@ -1,0 +1,25 @@
+name: Build Web App
+
+on:
+    pull_request:
+        branches:
+            - master
+        paths:
+            - "packages/web/**"
+            - "packages/quicktype-core/**"
+            - "packages/quicktype-typescript-input/**"
+            - "packages/quicktype-graphql-input/**"
+            - ".github/workflows/build-web.yml"
+            - ".github/workflows/setup/**"
+
+jobs:
+    build:
+        runs-on: ubuntu-22.04
+        steps:
+            - uses: actions/checkout@v4
+            - uses: ./.github/workflows/setup
+            - name: Build engine packages for web
+              run: |
+                  npm run build --workspace=packages/quicktype-core
+                  npm run build --workspace=packages/quicktype-graphql-input
+            - run: npm run build --workspace=packages/web

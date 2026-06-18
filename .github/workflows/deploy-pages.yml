@@ -1,0 +1,38 @@
+name: Deploy Web App to GitHub Pages
+
+on:
+    push:
+        branches:
+            - master
+    workflow_dispatch:
+
+permissions:
+    contents: read
+    pages: write
+    id-token: write
+
+concurrency:
+    group: pages
+    cancel-in-progress: true
+
+jobs:
+    build-and-deploy:
+        runs-on: ubuntu-22.04
+        environment:
+            name: github-pages
+            url: ${{ steps.deployment.outputs.page_url }}
+        steps:
+            - uses: actions/checkout@v4
+            - uses: ./.github/workflows/setup
+            - name: Build engine packages for web
+              run: |
+                  npm run build --workspace=packages/quicktype-core
+                  npm run build --workspace=packages/quicktype-graphql-input
+            - name: Inject version into web build
+              run: echo "VITE_APP_VERSION=$(node -p \"require('./package.json').version\")" >> $GITHUB_ENV
+            - run: npm run build --workspace=packages/web
+            - uses: actions/upload-pages-artifact@v3
+              with:
+                  path: packages/web/dist
+            - id: deployment
+              uses: actions/deploy-pages@v4

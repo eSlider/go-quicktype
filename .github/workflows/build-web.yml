@@ -7,16 +7,17 @@ on:
         paths:
             - "packages/web/**"
             - "packages/quicktype-core/**"
-            - "packages/quicktype-typescript-input/**"
             - "packages/quicktype-graphql-input/**"
             - ".github/workflows/build-web.yml"
-            - ".github/workflows/setup/**"
 
 jobs:
     build:
         runs-on: ubuntu-22.04
         steps:
             - uses: actions/checkout@v4
+            - uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: latest
             - name: Setup node
               uses: actions/setup-node@v4
               with:
@@ -27,4 +28,5 @@ jobs:
               run: |
                   npm run build --workspace=packages/quicktype-core
                   npm run build --workspace=packages/quicktype-graphql-input
-            - run: npm run build --workspace=packages/web
+            - run: APP_VERSION=ci bun run build
+              working-directory: packages/web

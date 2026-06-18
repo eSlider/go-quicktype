@@ -1,4 +1,4 @@
-import type { WorkerRequest, WorkerResponse } from "../lib/languages";
+import type { WorkerRequest, WorkerResponse } from "./messages";
 
 import { getLanguageCatalog, runQuicktype } from "./runQuicktype";
 

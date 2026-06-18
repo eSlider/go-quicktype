@@ -23,6 +23,9 @@ jobs:
             url: ${{ steps.deployment.outputs.page_url }}
         steps:
             - uses: actions/checkout@v4
+            - uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: latest
             - name: Setup node
               uses: actions/setup-node@v4
               with:
@@ -33,9 +36,10 @@ jobs:
               run: |
                   npm run build --workspace=packages/quicktype-core
                   npm run build --workspace=packages/quicktype-graphql-input
-            - name: Inject version into web build
-              run: echo "VITE_APP_VERSION=$(jq -r .version package.json)" >> "$GITHUB_ENV"
-            - run: npm run build --workspace=packages/web
+            - name: Inject app version
+              run: echo "APP_VERSION=$(jq -r .version package.json)" >> "$GITHUB_ENV"
+            - run: bun run build
+              working-directory: packages/web
             - uses: actions/upload-pages-artifact@v3
               with:
                   path: packages/web/dist

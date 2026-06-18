@@ -21,8 +21,8 @@
         "debug": "node --inspect-brk --max-old-space-size=4096 ./dist/index.js",
         "lint": "eslint src/** packages/*/src/**",
         "lint:fix": "eslint --fix src/** packages/*/src/**",
-        "dev:web": "npm run dev --workspace=packages/web",
-        "build:web": "npm run build --workspace=packages/quicktype-core && npm run build --workspace=packages/quicktype-graphql-input && npm run build --workspace=packages/web"
+        "dev:web": "cd packages/web && bun run dev",
+        "build:web": "npm run build --workspace=packages/quicktype-core && npm run build --workspace=packages/quicktype-graphql-input && cd packages/web && bun run build"
     },
     "workspaces": [
         "./packages/quicktype-core",

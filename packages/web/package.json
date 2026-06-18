@@ -14,25 +14,11 @@
         "url": "https://github.com/eSlider/go-quicktype/issues"
     },
     "scripts": {
-        "bundle-worker": "node scripts/bundle-worker.mjs",
-        "dev": "npm run bundle-worker && vite",
-        "build": "npm run bundle-worker && vite build",
-        "preview": "vite preview"
+        "dev": "bun scripts/dev.ts",
+        "build": "bun scripts/build.ts"
     },
     "dependencies": {
         "quicktype-core": "file:../quicktype-core",
-        "quicktype-graphql-input": "file:../quicktype-graphql-input",
-        "react": "^19.1.0",
-        "react-dom": "^19.1.0"
-    },
-    "devDependencies": {
-        "@tailwindcss/vite": "^4.1.8",
-        "@types/react": "^19.1.6",
-        "@types/react-dom": "^19.1.5",
-        "@vitejs/plugin-react": "^4.5.2",
-        "esbuild": "^0.20.2",
-        "tailwindcss": "^4.1.8",
-        "typescript": "~5.8.3",
-        "vite": "^6.3.5"
+        "quicktype-graphql-input": "file:../quicktype-graphql-input"
     }
 }

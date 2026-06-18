@@ -7,8 +7,8 @@ fi
 
 if [[ $CI ]]; then
 	if [[ "$OSTYPE" == "darwin"* ]]; then
-		grep -rl '$fetch' src | xargs sed -i '' -e 's/$fetch/$fetch.ci/g'
+		grep -rl 'from "./\$fetch"' src | xargs sed -i '' -e 's|from "./$fetch"|from "./$fetch.ci"|g'
 	else
-		grep -rl '$fetch' src | xargs sed -i -e 's/$fetch/$fetch.ci/g'
+		grep -rl 'from "./\$fetch"' src | xargs sed -i -e 's|from "./$fetch"|from "./$fetch.ci"|g'
 	fi
 fi

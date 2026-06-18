@@ -17,7 +17,12 @@ jobs:
         runs-on: ubuntu-22.04
         steps:
             - uses: actions/checkout@v4
-            - uses: ./.github/workflows/setup
+            - name: Setup node
+              uses: actions/setup-node@v4
+              with:
+                  node-version-file: .nvmrc
+                  cache: npm
+            - run: npm ci
             - name: Build engine packages for web
               run: |
                   npm run build --workspace=packages/quicktype-core

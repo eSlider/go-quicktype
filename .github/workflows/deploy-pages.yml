@@ -34,7 +34,7 @@ jobs:
                   npm run build --workspace=packages/quicktype-core
                   npm run build --workspace=packages/quicktype-graphql-input
             - name: Inject version into web build
-              run: echo "VITE_APP_VERSION=$(node -p \"require('./package.json').version\")" >> $GITHUB_ENV
+              run: echo "VITE_APP_VERSION=$(jq -r .version package.json)" >> "$GITHUB_ENV"
             - run: npm run build --workspace=packages/web
             - uses: actions/upload-pages-artifact@v3
               with:

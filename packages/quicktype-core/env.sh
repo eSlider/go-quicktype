@@ -5,7 +5,7 @@ if [[ $PUBLISH == true ]]; then
   exit 0
 fi
 
-if [[ $CI ]]; then
+if [[ $CI && ! $WEB_BUILD ]]; then
 	if [[ "$OSTYPE" == "darwin"* ]]; then
 		grep -rl 'from "./\$fetch"' src | xargs sed -i '' -e 's|from "./$fetch"|from "./$fetch.ci"|g'
 	else

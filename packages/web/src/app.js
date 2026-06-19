@@ -7,10 +7,15 @@ import {
     savePersistedState,
 } from "./constants.js";
 
-const { createApp, ref, computed, watch, onMounted } = Vue;
+const { createApp, ref, computed, watch, onMounted, toRaw } = Vue;
 const { createVuetify } = Vuetify;
 
 const APP_VERSION = "__APP_VERSION__";
+
+/** Worker postMessage requires plain structured-cloneable data, not Vue proxies. */
+function toPlain(value) {
+    return JSON.parse(JSON.stringify(toRaw(value)));
+}
 
 function workerUrl() {
     return new URL("assets/quicktype.worker.js", document.baseURI).href;
@@ -82,14 +87,16 @@ createApp({
             clearTimeout(debounceTimer);
             debounceTimer = setTimeout(() => {
                 running.value = true;
-                worker.postMessage({
-                    type: "run",
-                    inputKind: state.value.inputKind,
-                    inputText: state.value.inputText,
-                    typeName: state.value.typeName,
-                    languageName: state.value.languageName,
-                    rendererOptions: state.value.rendererOptions,
-                });
+                worker.postMessage(
+                    toPlain({
+                        type: "run",
+                        inputKind: persisted.value.inputKind,
+                        inputText: persisted.value.inputText,
+                        typeName: persisted.value.typeName,
+                        languageName: persisted.value.languageName,
+                        rendererOptions: rendererOptions.value,
+                    }),
+                );
             }, 400);
         }
 
@@ -141,7 +148,7 @@ createApp({
         watch(
             state,
             (value) => {
-                savePersistedState(value);
+                savePersistedState(toPlain(value));
             },
             { deep: true },
         );

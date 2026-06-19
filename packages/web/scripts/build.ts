@@ -17,7 +17,9 @@ let html = await readFile(join(root, "index.html"), "utf8");
 html = html.replaceAll("__APP_VERSION__", version);
 await writeFile(join(dist, "index.html"), html);
 
-await copyFile(join(root, "src/app.js"), join(dist, "app.js"));
+let appJs = await readFile(join(root, "src/app.js"), "utf8");
+appJs = appJs.replaceAll("__APP_VERSION__", version);
+await writeFile(join(dist, "app.js"), appJs);
 await copyFile(join(root, "src/constants.js"), join(dist, "constants.js"));
 
 console.log(`Built dist/ (v${version})`);

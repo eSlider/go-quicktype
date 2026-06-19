@@ -33,6 +33,8 @@ jobs:
                   cache: npm
             - run: npm ci
             - name: Build engine packages for web
+              env:
+                  WEB_BUILD: "true"
               run: |
                   npm run build --workspace=packages/quicktype-core
                   npm run build --workspace=packages/quicktype-graphql-input

@@ -8,10 +8,14 @@ import {
 } from "./constants.js";
 import { CodeEditor } from "./assets/codeEditor.js";
 
-const { createApp, ref, computed, watch, onMounted, toRaw } = Vue;
+const { createApp, ref, computed, watch, onMounted, onBeforeUnmount, toRaw } = Vue;
 const { createVuetify } = Vuetify;
 
 const APP_VERSION = "__APP_VERSION__";
+
+function systemPrefersDark() {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
 
 /** Worker postMessage requires plain structured-cloneable data, not Vue proxies. */
 function toPlain(value) {
@@ -36,7 +40,7 @@ function inputEditorLanguage(inputKind) {
 
 const vuetify = createVuetify({
     theme: {
-        defaultTheme: "system",
+        defaultTheme: systemPrefersDark() ? "dark" : "light",
     },
 });
 
@@ -45,7 +49,6 @@ createApp({
         CodeEditor,
     },
     setup() {
-        const theme = Vuetify.useTheme();
         const drawer = ref(true);
         const ready = ref(false);
         const running = ref(false);
@@ -58,7 +61,8 @@ createApp({
         const persisted = ref(loadPersistedState());
         const rendererOptions = ref({});
 
-        const isDark = computed(() => theme.global.current.value.dark);
+        const isDark = ref(systemPrefersDark());
+        let removeThemeListener = null;
 
         const inputLanguage = computed(() =>
             inputEditorLanguage(persisted.value.inputKind),
@@ -192,6 +196,23 @@ createApp({
         );
 
         onMounted(() => {
+            const media = window.matchMedia("(prefers-color-scheme: dark)");
+            const syncTheme = () => {
+                isDark.value = media.matches;
+                const $vuetify =
+                    Vue.getCurrentInstance()?.appContext?.config?.globalProperties
+                        ?.$vuetify;
+                if ($vuetify?.theme?.global?.name) {
+                    $vuetify.theme.global.name.value = media.matches
+                        ? "dark"
+                        : "light";
+                }
+            };
+            syncTheme();
+            media.addEventListener("change", syncTheme);
+            removeThemeListener = () =>
+                media.removeEventListener("change", syncTheme);
+
             worker = new Worker(workerUrl(), { type: "module" });
             worker.onmessage = (event) => {
                 const response = event.data;
@@ -229,6 +250,10 @@ createApp({
                 running.value = false;
             };
             worker.postMessage({ type: "init" });
+        });
+
+        onBeforeUnmount(() => {
+            removeThemeListener?.();
         });
 
         return {

@@ -6,7 +6,7 @@ import {
     INPUT_KINDS,
     savePersistedState,
 } from "./constants.js";
-import { CodeEditor } from "./assets/codeEditor.js";
+import { AceEditor } from "./components/aceEditor.js";
 
 const { createApp, ref, computed, watch, onMounted, onBeforeUnmount, toRaw } = Vue;
 const { createVuetify } = Vuetify;
@@ -46,7 +46,7 @@ const vuetify = createVuetify({
 
 createApp({
     components: {
-        CodeEditor,
+        AceEditor,
     },
     setup() {
         const drawer = ref(true);
@@ -377,7 +377,7 @@ createApp({
             <v-card-title class="text-subtitle-2 py-2">Input</v-card-title>
             <v-divider />
             <v-card-text class="editor-pane pa-0">
-              <code-editor
+              <ace-editor
                 v-model="persisted.inputText"
                 :language="inputLanguage"
                 :dark="isDark"
@@ -402,7 +402,7 @@ createApp({
             <v-divider />
             <v-alert v-if="error" type="error" variant="tonal" class="ma-3" density="compact">{{ error }}</v-alert>
             <v-card-text v-else class="editor-pane pa-0">
-              <code-editor
+              <ace-editor
                 :model-value="outputText"
                 :language="outputLanguage"
                 :dark="isDark"

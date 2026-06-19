@@ -10,9 +10,9 @@ const version =
 
 await rm(dist, { recursive: true, force: true });
 await mkdir(join(dist, "assets"), { recursive: true });
+await mkdir(join(dist, "components"), { recursive: true });
 
 await import("./bundle-worker.ts");
-await import("./bundle-editor.ts");
 
 let html = await readFile(join(root, "index.html"), "utf8");
 html = html.replaceAll("__APP_VERSION__", version);
@@ -22,5 +22,9 @@ let appJs = await readFile(join(root, "src/app.js"), "utf8");
 appJs = appJs.replaceAll("__APP_VERSION__", version);
 await writeFile(join(dist, "app.js"), appJs);
 await copyFile(join(root, "src/constants.js"), join(dist, "constants.js"));
+await copyFile(
+    join(root, "src/components/aceEditor.js"),
+    join(dist, "components/aceEditor.js"),
+);
 
 console.log(`Built dist/ (v${version})`);

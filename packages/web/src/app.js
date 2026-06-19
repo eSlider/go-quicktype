@@ -281,12 +281,13 @@ createApp({
 
       <div class="text-caption text-medium-emphasis mb-2">Options</div>
       <div v-for="opt in optionDefinitions" :key="opt.name" class="mb-3">
-        <v-checkbox
+        <v-switch
           v-if="opt.kind === 'boolean'"
           v-model="rendererOptions[opt.name]"
           :label="opt.description"
           density="compact"
           hide-details
+          color="primary"
         />
         <v-text-field
           v-else

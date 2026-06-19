@@ -12,6 +12,7 @@ await rm(dist, { recursive: true, force: true });
 await mkdir(join(dist, "assets"), { recursive: true });
 
 await import("./bundle-worker.ts");
+await import("./bundle-editor.ts");
 
 let html = await readFile(join(root, "index.html"), "utf8");
 html = html.replaceAll("__APP_VERSION__", version);

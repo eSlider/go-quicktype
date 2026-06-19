@@ -6,6 +6,7 @@ import {
     INPUT_KINDS,
     savePersistedState,
 } from "./constants.js";
+import { CodeEditor } from "./assets/codeEditor.js";
 
 const { createApp, ref, computed, watch, onMounted, toRaw } = Vue;
 const { createVuetify } = Vuetify;
@@ -21,24 +22,30 @@ function workerUrl() {
     return new URL("assets/quicktype.worker.js", document.baseURI).href;
 }
 
+function inputEditorLanguage(inputKind) {
+    switch (inputKind) {
+        case "typescript":
+            return "typescript";
+        case "json":
+        case "json-schema":
+        case "graphql":
+        default:
+            return "json";
+    }
+}
+
 const vuetify = createVuetify({
     theme: {
-        defaultTheme: "dark",
-        themes: {
-            dark: {
-                colors: {
-                    background: "#0f1419",
-                    surface: "#1a2332",
-                    primary: "#38bdf8",
-                    secondary: "#64748b",
-                },
-            },
-        },
+        defaultTheme: "system",
     },
 });
 
 createApp({
+    components: {
+        CodeEditor,
+    },
     setup() {
+        const theme = Vuetify.useTheme();
         const drawer = ref(true);
         const ready = ref(false);
         const running = ref(false);
@@ -50,6 +57,26 @@ createApp({
 
         const persisted = ref(loadPersistedState());
         const rendererOptions = ref({});
+
+        const isDark = computed(() => theme.global.current.value.dark);
+
+        const inputLanguage = computed(() =>
+            inputEditorLanguage(persisted.value.inputKind),
+        );
+
+        const outputLanguage = computed(
+            () => persisted.value.languageName ?? "plaintext",
+        );
+
+        const outputText = computed(() => {
+            if (error.value) {
+                return "";
+            }
+            if (running.value && !code.value) {
+                return "Generating…";
+            }
+            return code.value;
+        });
 
         const state = computed(() => ({
             inputKind: persisted.value.inputKind,
@@ -170,8 +197,13 @@ createApp({
                 const response = event.data;
                 if (response.type === "languages") {
                     languages.value = response.languages;
-                    if (!languages.value.some((l) => l.name === persisted.value.languageName)) {
-                        persisted.value.languageName = languages.value[0]?.name ?? "go";
+                    if (
+                        !languages.value.some(
+                            (l) => l.name === persisted.value.languageName,
+                        )
+                    ) {
+                        persisted.value.languageName =
+                            languages.value[0]?.name ?? "go";
                     }
                     rendererOptions.value =
                         persisted.value.rendererOptions ??
@@ -210,6 +242,10 @@ createApp({
             error,
             snackbar,
             snackbarText,
+            isDark,
+            inputLanguage,
+            outputLanguage,
+            outputText,
             INPUT_KINDS,
             languageItems,
             optionDefinitions,
@@ -301,34 +337,32 @@ createApp({
     </v-container>
   </v-navigation-drawer>
 
-  <v-main>
-    <v-container fluid class="fill-height pa-4">
-      <v-row v-if="!ready" class="fill-height" align="center" justify="center">
-        <v-col cols="12" class="text-center">
-          <v-progress-circular indeterminate color="primary" size="48" />
-          <div class="mt-4 text-medium-emphasis">Loading quicktype engine…</div>
-        </v-col>
-      </v-row>
+  <v-main class="editor-main">
+    <v-container v-if="!ready" fluid class="fill-height d-flex align-center justify-center">
+      <div class="text-center">
+        <v-progress-circular indeterminate color="primary" size="48" />
+        <div class="mt-4 text-medium-emphasis">Loading quicktype engine…</div>
+      </div>
+    </v-container>
 
-      <v-row v-else class="fill-height" dense>
-        <v-col cols="12" md="6" class="d-flex flex-column" style="min-height: 70vh">
-          <v-card variant="outlined" class="flex-grow-1 d-flex flex-column">
+    <v-container v-else fluid class="editor-shell pa-4">
+      <v-row class="editor-grid" dense>
+        <v-col cols="12" md="6" class="editor-col">
+          <v-card variant="outlined" class="editor-card">
             <v-card-title class="text-subtitle-2 py-2">Input</v-card-title>
             <v-divider />
-            <v-textarea
-              v-model="persisted.inputText"
-              variant="plain"
-              auto-grow
-              rows="16"
-              class="flex-grow-1 font-mono pa-3"
-              hide-details
-              spellcheck="false"
-            />
+            <v-card-text class="editor-pane pa-0">
+              <code-editor
+                v-model="persisted.inputText"
+                :language="inputLanguage"
+                :dark="isDark"
+              />
+            </v-card-text>
           </v-card>
         </v-col>
 
-        <v-col cols="12" md="6" class="d-flex flex-column" style="min-height: 70vh">
-          <v-card variant="outlined" class="flex-grow-1 d-flex flex-column">
+        <v-col cols="12" md="6" class="editor-col">
+          <v-card variant="outlined" class="editor-card">
             <v-card-title class="d-flex align-center py-2">
               <span class="text-subtitle-2">Output</span>
               <v-spacer />
@@ -342,16 +376,14 @@ createApp({
             </v-card-title>
             <v-divider />
             <v-alert v-if="error" type="error" variant="tonal" class="ma-3" density="compact">{{ error }}</v-alert>
-            <v-textarea
-              v-else
-              :model-value="running && !code ? 'Generating…' : code"
-              variant="plain"
-              readonly
-              auto-grow
-              rows="16"
-              class="flex-grow-1 font-mono pa-3"
-              hide-details
-            />
+            <v-card-text v-else class="editor-pane pa-0">
+              <code-editor
+                :model-value="outputText"
+                :language="outputLanguage"
+                :dark="isDark"
+                readonly
+              />
+            </v-card-text>
           </v-card>
         </v-col>
       </v-row>

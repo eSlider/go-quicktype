@@ -14,7 +14,12 @@ export function getLanguageCatalog(): LanguageInfo[] {
             name: opt.name,
             description: opt.description,
             kind: opt.kind,
+            optionType: opt.optionType,
             defaultValue: opt.defaultValue,
+            values:
+                opt.optionType === "enum" && opt.values
+                    ? Object.keys(opt.values)
+                    : undefined,
         })),
     }));
 }

@@ -26,8 +26,10 @@ export interface LanguageInfo {
     optionDefinitions: Array<{
         name: string;
         description: string;
-        kind: string;
+        kind?: string;
+        optionType: "string" | "boolean" | "enum";
         defaultValue: string | boolean;
+        values?: string[];
     }>;
 }
 

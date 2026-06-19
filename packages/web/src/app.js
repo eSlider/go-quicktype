@@ -1,7 +1,9 @@
 import {
     STORAGE_KEY,
     defaultOptionsForLanguage,
+    enumItemsForOption,
     loadPersistedState,
+    normalizeRendererOptions,
     sampleForInputKind,
     INPUT_KINDS,
     savePersistedState,
@@ -132,10 +134,15 @@ createApp({
         }
 
         function applyLanguageDefaults(name) {
-            rendererOptions.value = defaultOptionsForLanguage(
-                languages.value,
-                name,
+            const lang = languages.value.find((l) => l.name === name);
+            rendererOptions.value = normalizeRendererOptions(
+                lang,
+                rendererOptions.value,
             );
+        }
+
+        function optionControlType(opt) {
+            return opt.optionType ?? (typeof opt.defaultValue === "boolean" ? "boolean" : "string");
         }
 
         function onLanguageChange(name) {
@@ -226,12 +233,12 @@ createApp({
                         persisted.value.languageName =
                             languages.value[0]?.name ?? "go";
                     }
-                    rendererOptions.value =
-                        persisted.value.rendererOptions ??
-                        defaultOptionsForLanguage(
-                            languages.value,
-                            persisted.value.languageName,
-                        );
+                    rendererOptions.value = normalizeRendererOptions(
+                        languages.value.find(
+                            (l) => l.name === persisted.value.languageName,
+                        ),
+                        persisted.value.rendererOptions,
+                    );
                     ready.value = true;
                     scheduleRun();
                     return;
@@ -274,6 +281,8 @@ createApp({
             INPUT_KINDS,
             languageItems,
             optionDefinitions,
+            optionControlType,
+            enumItemsForOption,
             onLanguageChange,
             onInputKindChange,
             copyOutput,
@@ -342,13 +351,22 @@ createApp({
 
       <div class="text-caption text-medium-emphasis mb-2">Options</div>
       <div v-for="opt in optionDefinitions" :key="opt.name" class="mb-3">
-        <v-switch
-          v-if="opt.kind === 'boolean'"
+        <v-checkbox
+          v-if="optionControlType(opt) === 'boolean'"
           v-model="rendererOptions[opt.name]"
           :label="opt.description"
           density="compact"
           hide-details
           color="primary"
+        />
+        <v-select
+          v-else-if="optionControlType(opt) === 'enum'"
+          v-model="rendererOptions[opt.name]"
+          :items="enumItemsForOption(opt)"
+          :label="opt.description"
+          variant="outlined"
+          density="compact"
+          hide-details
         />
         <v-text-field
           v-else

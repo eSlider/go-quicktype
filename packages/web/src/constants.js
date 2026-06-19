@@ -65,12 +65,44 @@ export function sampleForInputKind(kind) {
 
 export function defaultOptionsForLanguage(languages, languageName) {
     const lang = languages.find((l) => l.name === languageName);
+    return normalizeRendererOptions(lang);
+}
+
+export function normalizeRendererOptions(lang, saved = {}) {
     if (!lang) {
         return {};
     }
+
     return Object.fromEntries(
-        lang.optionDefinitions.map((opt) => [opt.name, opt.defaultValue]),
+        lang.optionDefinitions.map((opt) => {
+            let value = saved[opt.name] ?? opt.defaultValue;
+
+            if (opt.optionType === "boolean") {
+                if (value === "true" || value === true) {
+                    value = true;
+                } else if (value === "false" || value === false) {
+                    value = false;
+                } else {
+                    value = Boolean(opt.defaultValue);
+                }
+            } else if (
+                opt.optionType === "enum" &&
+                opt.values &&
+                !opt.values.includes(value)
+            ) {
+                value = opt.defaultValue;
+            }
+
+            return [opt.name, value];
+        }),
     );
+}
+
+export function enumItemsForOption(opt) {
+    return (opt.values ?? []).map((value) => ({
+        title: value,
+        value,
+    }));
 }
 
 export function loadPersistedState() {

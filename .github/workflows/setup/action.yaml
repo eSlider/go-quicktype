@@ -31,6 +31,13 @@ runs:
           run: bun install --frozen-lockfile
           shell: bash
 
+        - name: Normalize sibling workspace links
+          shell: bash
+          run: |
+              for pkg in quicktype-core quicktype-graphql-input quicktype-typescript-input; do
+                  find packages -type d -path "*/node_modules/$pkg" -prune -exec rm -rf {} +
+              done
+
         - name: Build Packages
           run: bun run build
           shell: bash

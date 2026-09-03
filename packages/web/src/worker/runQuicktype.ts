@@ -1,8 +1,8 @@
 import { GraphQLInput } from "quicktype-graphql-input";
-import { InputData, jsonInputForTargetLanguage } from "quicktype-core/dist/input/Inputs";
-import { JSONSchemaInput } from "quicktype-core/dist/input/JSONSchemaInput";
-import { all as defaultTargetLanguages } from "quicktype-core/dist/language/All";
-import { quicktype } from "quicktype-core/dist/Run";
+import { InputData, jsonInputForTargetLanguage } from "quicktype-core/dist/input/Inputs.js";
+import { JSONSchemaInput } from "quicktype-core/dist/input/JSONSchemaInput.js";
+import { all as defaultTargetLanguages } from "quicktype-core/dist/language/All.js";
+import { quicktype } from "quicktype-core/dist/Run.js";
 
 import type { LanguageInfo, QuicktypeRequest, QuicktypeResponse } from "../types";
 

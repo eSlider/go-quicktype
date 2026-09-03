@@ -10,7 +10,8 @@ import {
 } from "./constants.js";
 import { AceEditor } from "./components/aceEditor.js";
 
-const { createApp, ref, computed, watch, onMounted, onBeforeUnmount, toRaw } = Vue;
+const { createApp, ref, computed, watch, onMounted, onBeforeUnmount, toRaw } =
+    Vue;
 const { createVuetify } = Vuetify;
 
 const APP_VERSION = "__APP_VERSION__";
@@ -142,7 +143,10 @@ createApp({
         }
 
         function optionControlType(opt) {
-            return opt.optionType ?? (typeof opt.defaultValue === "boolean" ? "boolean" : "string");
+            return (
+                opt.optionType ??
+                (typeof opt.defaultValue === "boolean" ? "boolean" : "string")
+            );
         }
 
         function onLanguageChange(name) {
@@ -207,8 +211,8 @@ createApp({
             const syncTheme = () => {
                 isDark.value = media.matches;
                 const $vuetify =
-                    Vue.getCurrentInstance()?.appContext?.config?.globalProperties
-                        ?.$vuetify;
+                    Vue.getCurrentInstance()?.appContext?.config
+                        ?.globalProperties?.$vuetify;
                 if ($vuetify?.theme?.global?.name) {
                     $vuetify.theme.global.name.value = media.matches
                         ? "dark"

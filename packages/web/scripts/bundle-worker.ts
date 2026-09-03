@@ -47,7 +47,10 @@ const result = await Bun.build({
             name: "node-builtins-empty",
             setup(build) {
                 for (const builtin of nodeBuiltins) {
-                    const escaped = builtin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+                    const escaped = builtin.replace(
+                        /[.*+?^${}()|[\]\\]/g,
+                        "\\$&",
+                    );
                     build.onResolve(
                         { filter: new RegExp(`^${escaped}$`) },
                         () => ({ path: emptyModule }),

@@ -1,10 +1,17 @@
 import { GraphQLInput } from "quicktype-graphql-input";
-import { InputData, jsonInputForTargetLanguage } from "quicktype-core/dist/input/Inputs.js";
+import {
+    InputData,
+    jsonInputForTargetLanguage,
+} from "quicktype-core/dist/input/Inputs.js";
 import { JSONSchemaInput } from "quicktype-core/dist/input/JSONSchemaInput.js";
 import { all as defaultTargetLanguages } from "quicktype-core/dist/language/All.js";
 import { quicktype } from "quicktype-core/dist/Run.js";
 
-import type { LanguageInfo, QuicktypeRequest, QuicktypeResponse } from "../types";
+import type {
+    LanguageInfo,
+    QuicktypeRequest,
+    QuicktypeResponse,
+} from "../types";
 
 export function getLanguageCatalog(): LanguageInfo[] {
     return defaultTargetLanguages.map((lang) => ({
@@ -102,8 +109,7 @@ export async function runQuicktype(
 
         return { ok: true, code: result.lines.join("\n") };
     } catch (error) {
-        const message =
-            error instanceof Error ? error.message : String(error);
+        const message = error instanceof Error ? error.message : String(error);
         return { ok: false, error: message };
     }
 }

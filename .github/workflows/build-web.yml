@@ -22,13 +22,12 @@ jobs:
               uses: actions/setup-node@v4
               with:
                   node-version-file: .nvmrc
-                  cache: npm
-            - run: npm ci
+            - run: bun install --frozen-lockfile
             - name: Build engine packages for web
               env:
                   WEB_BUILD: "true"
               run: |
-                  npm run build --workspace=packages/quicktype-core
-                  npm run build --workspace=packages/quicktype-graphql-input
+                  (cd packages/quicktype-core && bun run build)
+                  (cd packages/quicktype-graphql-input && bun run build)
             - run: APP_VERSION=ci bun run build:app
               working-directory: packages/web

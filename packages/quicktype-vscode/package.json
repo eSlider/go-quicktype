@@ -136,11 +136,11 @@
         "package": "vsce package",
         "build": "node ../../node_modules/typescript/bin/tsc -p ./",
         "watch": "node ../../node_modules/typescript/bin/tsc -watch -p ./",
-        "test": "npm run build && node ./node_modules/vscode/bin/test",
-        "vscode:prepublish": "npm run esbuild-base -- --minify",
+        "test": "bun run build && node ./node_modules/vscode/bin/test",
+        "vscode:prepublish": "bun run esbuild-base --minify",
         "esbuild-base": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
-        "esbuild": "npm run esbuild-base -- --sourcemap",
-        "esbuild-watch": "npm run esbuild-base -- --sourcemap --watch"
+        "esbuild": "bun run esbuild-base --sourcemap",
+        "esbuild-watch": "bun run esbuild-base --sourcemap --watch"
     },
     "devDependencies": {
         "@types/mocha": "^10.0.6",

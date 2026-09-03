@@ -38,7 +38,7 @@ jobs:
                   CPUs: "4"
                   ONLY_OUTPUT: "1"
                   OUTPUT_SNAPSHOT_DIR: ${{ github.workspace }}/.output-diffs/base
-              run: npm run test:output-snapshot
+              run: bun run test:output-snapshot
             - name: Save exact snapshot
               if: steps.snapshot-cache.outputs.cache-hit != 'true'
               uses: actions/cache/save@v4
@@ -84,20 +84,18 @@ jobs:
                       echo "The base commit predates generated-output snapshot support; this bootstrap comparison is skipped." >> "$GITHUB_STEP_SUMMARY"
                   fi
 
-            - name: Set up Node
+            - name: Set up Bun
               if: steps.compatibility.outputs.supported == 'true'
-              uses: actions/setup-node@v4
+              uses: oven-sh/setup-bun@v2
               with:
-                  node-version-file: head-source/.nvmrc
-                  cache: npm
-                  cache-dependency-path: head-source/package-lock.json
+                  bun-version: "1.4.0"
 
             - name: Build base after a cache miss
               id: base-build
               if: steps.compatibility.outputs.supported == 'true' && steps.base-cache.outputs.cache-hit != 'true'
               continue-on-error: true
               working-directory: base-source
-              run: npm ci && npm run build
+              run: bun install --frozen-lockfile && bun run build
 
             - name: Generate base snapshot after a cache miss
               id: base-snapshot
@@ -109,7 +107,7 @@ jobs:
                   CPUs: "4"
                   ONLY_OUTPUT: "1"
                   OUTPUT_SNAPSHOT_DIR: ${{ github.workspace }}/.output-diffs/base
-              run: npm run test:output-snapshot
+              run: bun run test:output-snapshot
 
             - name: Save PR-scoped base snapshot after a cache miss
               if: steps.compatibility.outputs.supported == 'true' && steps.base-cache.outputs.cache-hit != 'true' && steps.base-snapshot.outcome == 'success'
@@ -121,7 +119,7 @@ jobs:
             - name: Build tested PR merge
               if: steps.compatibility.outputs.supported == 'true' && (steps.base-cache.outputs.cache-hit == 'true' || steps.base-snapshot.outcome == 'success')
               working-directory: head-source
-              run: npm ci && npm run build
+              run: bun install --frozen-lockfile && bun run build
 
             - name: Generate tested PR merge snapshot
               if: steps.compatibility.outputs.supported == 'true' && (steps.base-cache.outputs.cache-hit == 'true' || steps.base-snapshot.outcome == 'success')
@@ -131,7 +129,7 @@ jobs:
                   CPUs: "4"
                   ONLY_OUTPUT: "1"
                   OUTPUT_SNAPSHOT_DIR: ${{ github.workspace }}/.output-diffs/head
-              run: npm run test:output-snapshot
+              run: bun run test:output-snapshot
 
             - name: Compare snapshots
               if: steps.compatibility.outputs.supported == 'true' && (steps.base-cache.outputs.cache-hit == 'true' || steps.base-snapshot.outcome == 'success')

@@ -19,12 +19,12 @@ jobs:
                   node-version: ${{ matrix.node-version }}
             - name: Check formatting (Biome)
               if: ${{ matrix.node-version == '24' }}
-              run: npm run lint
-            - run: npm run test:unit
-            - run: node dist/index.js --version
+              run: bun run lint
+            - run: bun run test:unit
+            - run: bun dist/index.js --version
             - name: Run representative fixtures on the minimum Node version
               if: ${{ matrix.node-version == '20' }}
-              run: CPUs=2 QUICKTEST=true FIXTURE=javascript,typescript npm run test:fixtures -- test/inputs/json/samples/pokedex.json
+              run: CPUs=2 QUICKTEST=true FIXTURE=javascript,typescript bun run test:fixtures test/inputs/json/samples/pokedex.json
 
     test:
         needs: [build]
@@ -161,7 +161,7 @@ jobs:
             - name: Install flow
               if: ${{ contains(matrix.fixture, 'flow') }}
               run: |
-                  npm install -g flow-bin@0.66.0 flow-remove-types@1.2.3
+                  bun add -g flow-bin@0.66.0 flow-remove-types@1.2.3
             - name: Install Java
               if: ${{ matrix.fixture == 'java,schema-java' || contains(matrix.fixture, 'kotlin') }}
               uses: actions/setup-java@v3
@@ -210,7 +210,7 @@ jobs:
                   elixir-version: "1.15.7"
                   otp-version: "26.0"
 
-            - run: QUICKTEST=true FIXTURE=${{ matrix.fixture }} npm run test:fixtures
+            - run: QUICKTEST=true FIXTURE=${{ matrix.fixture }} bun run test:fixtures
               env:
                   CPUs: ${{ contains(matrix.fixture, 'scala3') && '2' || '0' }}
 

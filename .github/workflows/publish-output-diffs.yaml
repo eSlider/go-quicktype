@@ -91,18 +91,16 @@ jobs:
                   fs.appendFileSync(process.env.GITHUB_OUTPUT, output);
                   NODE
 
-            - name: Set up Node
+            - name: Set up Bun
               if: steps.metadata.outputs.supported == 'true' && steps.metadata.outputs.has_differences == 'true'
-              uses: actions/setup-node@v4
+              uses: oven-sh/setup-bun@v2
               with:
-                  node-version-file: trusted-source/.nvmrc
-                  cache: npm
-                  cache-dependency-path: trusted-source/package-lock.json
+                  bun-version: "1.4.0"
 
             - name: Install trusted report dependencies
               if: steps.metadata.outputs.supported == 'true' && steps.metadata.outputs.has_differences == 'true'
               working-directory: trusted-source
-              run: npm ci --ignore-scripts
+              run: bun install --ignore-scripts
 
             - name: Render report
               if: steps.metadata.outputs.supported == 'true' && steps.metadata.outputs.has_differences == 'true'

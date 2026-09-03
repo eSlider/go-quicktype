@@ -5,13 +5,21 @@ import {
     setMap,
     setUnionInto,
 } from "collection-utils";
-import * as pluralize from "pluralize";
+import pluralize from "pluralize";
 
-import { Chance } from "../support/Chance";
-import { splitIntoWords } from "../support/Strings";
-import { assert, defined, panic } from "../support/Support";
+import { Chance } from "../support/Chance.js";
+import { splitIntoWords } from "../support/Strings.js";
+import { assert, defined, panic } from "../support/Support.js";
 
-import { TypeAttributeKind, type TypeAttributes } from "./TypeAttributes";
+import { TypeAttributeKind, type TypeAttributes } from "./TypeAttributes.js";
+
+function singularizeName(name: string): string {
+    // `pluralize` treats "cookies" as ending in the generic `-ies` suffix and
+    // produces "cooky".  Keep `cookie` intact, including in compound names.
+    if (/cookies$/i.test(name)) return name.slice(0, -1);
+
+    return pluralize.singular(name);
+}
 
 let chance: Chance;
 let usedRandomNames: Set<string>;
@@ -239,9 +247,9 @@ export class RegularTypeNames extends TypeNames {
 
     public singularize(): TypeNames {
         return TypeNames.makeWithDistance(
-            setMap(this.names, pluralize.singular),
+            setMap(this.names, singularizeName),
             definedMap(this._alternativeNames, (an) =>
-                setMap(an, pluralize.singular),
+                setMap(an, singularizeName),
             ),
             this.distance + 1,
         );

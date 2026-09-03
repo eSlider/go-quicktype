@@ -1,17 +1,20 @@
-import { funPrefixNamer } from "../../Naming";
+import { funPrefixNamer } from "../../Naming.js";
 import {
     allLowerWordStyle,
     allUpperWordStyle,
     combineWords,
+    escapeNonPrintableMapper,
     firstUpperWordStyle,
+    intToHex,
     isAscii,
-    isLetterOrUnderscore,
+    isLetter,
     isLetterOrUnderscoreOrDigit,
+    isPrintable,
     legalizeCharacters,
     splitIntoWords,
-} from "../../support/Strings";
-import { type ClassProperty, UnionType } from "../../Type";
-import { nullableFromUnion } from "../../Type/TypeUtils";
+    utf32ConcatMap,
+} from "../../support/Strings.js";
+import type { ClassProperty } from "../../Type/index.js";
 
 const legalizeName = legalizeCharacters(
     (cp) => isAscii(cp) && isLetterOrUnderscoreOrDigit(cp),
@@ -27,9 +30,18 @@ function elmNameStyle(original: string, upper: boolean): string {
         upper ? allUpperWordStyle : allLowerWordStyle,
         allUpperWordStyle,
         "",
-        isLetterOrUnderscore,
+        // Elm identifiers must not start with an underscore.
+        isLetter,
     );
 }
+
+function unicodeEscape(codePoint: number): string {
+    return `\\u{${intToHex(codePoint, 4).toUpperCase()}}`;
+}
+
+export const elmStringEscape = utf32ConcatMap(
+    escapeNonPrintableMapper(isPrintable, unicodeEscape),
+);
 
 export const upperNamingFunction = funPrefixNamer("upper", (n) =>
     elmNameStyle(n, true),
@@ -48,16 +60,8 @@ export function requiredOrOptional(p: ClassProperty): RequiredOrOptional {
         return { reqOrOpt: "Jpipe.optional", fallback };
     }
 
-    const t = p.type;
-    if (
-        p.isOptional ||
-        (t instanceof UnionType && nullableFromUnion(t) !== null)
-    ) {
+    if (p.isOptional) {
         return optional(" Nothing");
-    }
-
-    if (t.kind === "null") {
-        return optional(" ()");
     }
 
     return { reqOrOpt: "Jpipe.required", fallback: "" };

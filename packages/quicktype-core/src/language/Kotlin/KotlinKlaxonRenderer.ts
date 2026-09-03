@@ -1,36 +1,25 @@
 import { arrayIntercalate, iterableSome } from "collection-utils";
 
-import type { Name } from "../../Naming";
-import type { RenderContext } from "../../Renderer";
-import type { OptionValues } from "../../RendererOptions";
-import { type Sourcelike, modifySource } from "../../Source";
-import { camelCase } from "../../support/Strings";
-import { mustNotHappen } from "../../support/Support";
-import type { TargetLanguage } from "../../TargetLanguage";
+import type { Name } from "../../Naming.js";
+import { type Sourcelike, modifySource } from "../../Source.js";
+import { camelCase } from "../../support/Strings.js";
+import { mustNotHappen } from "../../support/Support.js";
 import {
-    type ArrayType,
+    ArrayType,
+    type ClassProperty,
     ClassType,
     type EnumType,
-    type MapType,
+    MapType,
     type PrimitiveType,
     type Type,
     UnionType,
-} from "../../Type";
-import { matchType, nullableFromUnion } from "../../Type/TypeUtils";
+} from "../../Type/index.js";
+import { matchType, nullableFromUnion } from "../../Type/TypeUtils.js";
 
-import { KotlinRenderer } from "./KotlinRenderer";
-import type { kotlinOptions } from "./language";
-import { stringEscape } from "./utils";
+import { KotlinRenderer } from "./KotlinRenderer.js";
+import { stringEscape, unionMemberMatchPriority } from "./utils.js";
 
 export class KotlinKlaxonRenderer extends KotlinRenderer {
-    public constructor(
-        targetLanguage: TargetLanguage,
-        renderContext: RenderContext,
-        _kotlinOptions: OptionValues<typeof kotlinOptions>,
-    ) {
-        super(targetLanguage, renderContext, _kotlinOptions);
-    }
-
     private unionMemberFromJsonValue(t: Type, e: Sourcelike): Sourcelike {
         return matchType<Sourcelike>(
             t,
@@ -38,7 +27,14 @@ export class KotlinKlaxonRenderer extends KotlinRenderer {
             (_nullType) => "null",
             (_boolType) => [e, ".boolean"],
             (_integerType) => ["(", e, ".int?.toLong() ?: ", e, ".longValue)"],
-            (_doubleType) => [e, ".double"],
+            (_doubleType) => [
+                e,
+                ".double ?: ",
+                e,
+                ".int?.toDouble() ?: ",
+                e,
+                ".longValue?.toDouble()",
+            ],
             (_stringType) => [e, ".string"],
             (arrayType) => [
                 e,
@@ -65,17 +61,35 @@ export class KotlinKlaxonRenderer extends KotlinRenderer {
                 ".fromValue(it) }",
             ],
             (_unionType) => mustNotHappen(),
+            (transformedStringType) => {
+                if (transformedStringType.kind === "date-time") {
+                    return [e, ".string?.let { OffsetDateTime.parse(it) }"];
+                }
+
+                if (transformedStringType.kind === "date") {
+                    return [e, ".string?.let { LocalDate.parse(it) }"];
+                }
+
+                if (transformedStringType.kind === "time") {
+                    return [e, ".string?.let { OffsetTime.parse(it) }"];
+                }
+
+                return [e, ".string"];
+            },
         );
     }
 
-    private unionMemberJsonValueGuard(t: Type, _e: Sourcelike): Sourcelike {
+    private unionMemberJsonValueGuard(t: Type, u: UnionType): Sourcelike {
         return matchType<Sourcelike>(
             t,
             (_anyType) => "is Any",
             (_nullType) => "null",
             (_boolType) => "is Boolean",
             (_integerType) => "is Int, is Long",
-            (_doubleType) => "is Double",
+            (_doubleType) =>
+                iterableSome(u.members, (m) => m.kind === "integer")
+                    ? "is Double"
+                    : "is Double, is Int, is Long",
             (_stringType) => "is String",
             (_arrayType) => "is JsonArray<*>",
             // These could be stricter, but for now we don't allow maps
@@ -86,6 +100,52 @@ export class KotlinKlaxonRenderer extends KotlinRenderer {
             // and enums in the same union
             (_enumType) => "is String",
             (_unionType) => mustNotHappen(),
+            (_transformedStringType) => "is String",
+        );
+    }
+
+    // Empty object types render as a typealias for JsonObject.  Klaxon's
+    // reflective deserializer never consults custom converters for map
+    // values, so a `Map<String, JsonObject>` property fails to parse:
+    // https://github.com/glideapps/quicktype/issues/2881
+    // Properties holding such maps (directly or nested inside other maps)
+    // are annotated so that a field-level converter — which Klaxon does
+    // consult — handles them instead.
+    private isEmptyObjectType(t: Type): boolean {
+        if (t instanceof UnionType) {
+            const nullable = nullableFromUnion(t);
+            return nullable !== null && this.isEmptyObjectType(nullable);
+        }
+
+        return t instanceof ClassType && t.getProperties().size === 0;
+    }
+
+    private needsJsonObjectMapAnnotation(t: Type): boolean {
+        if (t instanceof UnionType) {
+            const nullable = nullableFromUnion(t);
+            return (
+                nullable !== null && this.needsJsonObjectMapAnnotation(nullable)
+            );
+        }
+
+        if (!(t instanceof MapType)) {
+            return false;
+        }
+
+        return (
+            this.isEmptyObjectType(t.values) ||
+            this.needsJsonObjectMapAnnotation(t.values)
+        );
+    }
+
+    private hasJsonObjectMaps(): boolean {
+        return iterableSome(
+            this.typeGraph.allNamedTypes(),
+            (t) =>
+                t instanceof ClassType &&
+                iterableSome(t.getProperties().values(), (p) =>
+                    this.needsJsonObjectMapAnnotation(p.type),
+                ),
         );
     }
 
@@ -116,11 +176,56 @@ export class KotlinKlaxonRenderer extends KotlinRenderer {
             this.typeGraph.allNamedTypes(),
             (c) => c instanceof ClassType && c.getProperties().size === 0,
         );
-        if (hasUnions || this.haveEnums || hasEmptyObjects) {
+        const usesDateTime = this.haveTransformedStringType("date-time");
+        const usesDate = this.haveTransformedStringType("date");
+        const usesTime = this.haveTransformedStringType("time");
+        if (
+            hasUnions ||
+            this.haveEnums ||
+            hasEmptyObjects ||
+            usesDateTime ||
+            usesDate ||
+            usesTime
+        ) {
             this.emitGenericConverter();
         }
 
+        const hasJsonObjectMaps = this.hasJsonObjectMaps();
+        if (hasJsonObjectMaps) {
+            this.emitJsonObjectMapConverter();
+        }
+
         const converters: Sourcelike[][] = [];
+        if (usesDateTime) {
+            converters.push([
+                [".convert(OffsetDateTime::class,"],
+                [" { OffsetDateTime.parse(it.string!!) },"],
+                [
+                    ' { "\\"${java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(it)}\\"" })',
+                ],
+            ]);
+        }
+
+        if (usesDate) {
+            converters.push([
+                [".convert(LocalDate::class,"],
+                [" { LocalDate.parse(it.string!!) },"],
+                [
+                    ' { "\\"${java.time.format.DateTimeFormatter.ISO_LOCAL_DATE.format(it)}\\"" })',
+                ],
+            ]);
+        }
+
+        if (usesTime) {
+            converters.push([
+                [".convert(OffsetTime::class,"],
+                [" { OffsetTime.parse(it.string!!) },"],
+                [
+                    ' { "\\"${java.time.format.DateTimeFormatter.ISO_OFFSET_TIME.format(it)}\\"" })',
+                ],
+            ]);
+        }
+
         if (hasEmptyObjects) {
             converters.push([
                 [".convert(JsonObject::class,"],
@@ -149,10 +254,23 @@ export class KotlinKlaxonRenderer extends KotlinRenderer {
         if (converters.length > 0) {
             this.indent(() => this.emitTable(converters));
         }
+
+        if (hasJsonObjectMaps) {
+            this.indent(() =>
+                this.emitLine(
+                    ".fieldConverter(KlaxonJsonObjectMap::class, jsonObjectMapConverter)",
+                ),
+            );
+        }
     }
 
     protected emitTopLevelArray(t: ArrayType, name: Name): void {
         const elementType = this.kotlinType(t.items);
+        const parseType = t.items.kind === "integer" ? "Any" : elementType;
+        const validate =
+            t.items.kind === "integer"
+                ? ".map { when (it) { is Int -> it.toLong(); is Long -> it; else -> throw IllegalArgumentException() } }"
+                : [];
         this.emitBlock(
             [
                 "class ",
@@ -173,12 +291,32 @@ export class KotlinKlaxonRenderer extends KotlinRenderer {
                         "public fun fromJson(json: String) = ",
                         name,
                         "(klaxon.parseArray<",
-                        elementType,
-                        ">(json)!!)",
+                        parseType,
+                        ">(json)!!",
+                        validate,
+                        ")",
                     );
                 });
             },
         );
+    }
+
+    protected emitTopLevelPrimitive(t: PrimitiveType, name: Name): void {
+        const typeName = this.sourcelikeToString(name);
+        const valueType = this.sourcelikeToString(this.kotlinType(t));
+        const parse =
+            t.kind === "integer"
+                ? "json.toLong()"
+                : t.kind === "double"
+                  ? "json.toDouble()"
+                  : `klaxon.parseArray<${valueType}>("[\${json}]")!![0]`;
+        this.emitMultiline(`data class ${typeName}(val value: ${valueType}) {
+    public fun toJson() = klaxon.toJsonString(value)
+
+    companion object {
+        public fun fromJson(json: String) = ${typeName}(${parse})
+    }
+}`);
     }
 
     protected emitTopLevelMap(t: MapType, name: Name): void {
@@ -271,7 +409,12 @@ export class KotlinKlaxonRenderer extends KotlinRenderer {
         jsonName: string,
         _required: boolean,
         meta: Array<() => void>,
+        p: ClassProperty,
     ): void {
+        if (this.needsJsonObjectMapAnnotation(p.type)) {
+            meta.push(() => this.emitLine("@KlaxonJsonObjectMap"));
+        }
+
         const rename = this.klaxonRenameAttribute(name, jsonName);
         if (rename !== undefined) {
             meta.push(() => this.emitLine(rename));
@@ -280,6 +423,10 @@ export class KotlinKlaxonRenderer extends KotlinRenderer {
 
     protected emitEnumDefinition(e: EnumType, enumName: Name): void {
         this.emitDescription(this.descriptionForType(e));
+        const isTopLevel = iterableSome(
+            this.topLevels,
+            ([_, top]) => top === e,
+        );
 
         this.emitBlock(["enum class ", enumName, "(val value: String)"], () => {
             let count = e.cases.size;
@@ -290,8 +437,20 @@ export class KotlinKlaxonRenderer extends KotlinRenderer {
                     --count === 0 ? ";" : ",",
                 );
             });
+            if (isTopLevel) {
+                this.ensureBlankLine();
+                this.emitLine(
+                    "public fun toJson() = klaxon.toJsonString(value)",
+                );
+            }
             this.ensureBlankLine();
             this.emitBlock("companion object", () => {
+                if (isTopLevel) {
+                    this.emitLine(
+                        'public fun fromJson(json: String) = fromValue(klaxon.parseArray<String>("[${json}]")!![0])',
+                    );
+                    this.ensureBlankLine();
+                }
                 this.emitBlock(
                     [
                         "public fun fromValue(value: String): ",
@@ -318,6 +477,13 @@ export class KotlinKlaxonRenderer extends KotlinRenderer {
     }
 
     private emitGenericConverter(): void {
+        const hasNestedUnionArrays = iterableSome(
+            this.typeGraph.allTypesUnordered(),
+            (t) =>
+                t instanceof ArrayType &&
+                t.items instanceof ArrayType &&
+                t.items.items instanceof UnionType,
+        );
         this.ensureBlankLine();
         this.emitLine(
             "private fun <T> Klaxon.convert(k: kotlin.reflect.KClass<*>, fromJson: (JsonValue) -> T, toJson: (T) -> String, isUnion: Boolean = false) =",
@@ -333,7 +499,9 @@ export class KotlinKlaxonRenderer extends KotlinRenderer {
                     ],
                     [
                         "override fun fromJson(jv: JsonValue)",
-                        " = fromJson(jv) as Any",
+                        hasNestedUnionArrays
+                            ? " = if (isUnion && jv.inside is JsonArray<*>) (jv.inside as JsonArray<*>).map { fromJson(JsonValue(it, null, null, this@convert)) } else fromJson(jv) as Any"
+                            : " = fromJson(jv) as Any",
                     ],
                     [
                         "override fun canConvert(cls: Class<*>)",
@@ -345,12 +513,43 @@ export class KotlinKlaxonRenderer extends KotlinRenderer {
         });
     }
 
+    private emitJsonObjectMapConverter(): void {
+        this.ensureBlankLine();
+        this.emitLine(
+            "// Klaxon cannot deserialize map values typed as JsonObject, so fields",
+        );
+        this.emitLine(
+            "// holding such maps are converted at the field level instead.",
+        );
+        this.emitLine("@Target(AnnotationTarget.FIELD)");
+        this.emitLine("private annotation class KlaxonJsonObjectMap");
+        this.ensureBlankLine();
+        this.emitLine(
+            "private val jsonObjectMapConverter: Converter = object : Converter {",
+        );
+        this.indent(() => {
+            this.emitTable([
+                ["override fun canConvert(cls: Class<*>)", " = true"],
+                ["override fun fromJson(jv: JsonValue)", " = jv.obj!!"],
+                [
+                    "override fun toJson(value: Any)",
+                    " = klaxon.toJsonString(value)",
+                ],
+            ]);
+        });
+        this.emitLine("}");
+    }
+
     protected emitUnionDefinitionMethods(
         u: UnionType,
         nonNulls: ReadonlySet<Type>,
         maybeNull: PrimitiveType | null,
         unionName: Name,
     ): void {
+        const isTopLevel = iterableSome(
+            this.topLevels,
+            ([_, top]) => top === u,
+        );
         this.ensureBlankLine();
         this.emitLine(
             "public fun toJson(): String = klaxon.toJsonString(when (this) {",
@@ -370,40 +569,78 @@ export class KotlinKlaxonRenderer extends KotlinRenderer {
         this.emitLine("})");
         this.ensureBlankLine();
         this.emitBlock("companion object", () => {
+            if (isTopLevel) {
+                this.emitLine(
+                    "public fun fromJson(json: String): ",
+                    unionName,
+                    " = fromJson(JsonValue(Parser().parse(StringBuilder(json)), null, null, klaxon))",
+                );
+                this.ensureBlankLine();
+            }
             this.emitLine(
                 "public fun fromJson(jv: JsonValue): ",
                 unionName,
                 " = when (jv.inside) {",
             );
             this.indent(() => {
-                const table: Sourcelike[][] = [];
+                // Members whose JSON representations share a value type
+                // (several transformed string types, or a transformed string
+                // type and an enum, are all strings) must share a single
+                // guard and be tried in sequence, most specific parse first.
+                const groups: Array<{
+                    guard: string;
+                    members: Array<{ name: Name; t: Type }>;
+                }> = [];
                 this.forEachUnionMember(
                     u,
                     nonNulls,
                     "none",
                     null,
                     (name, t) => {
-                        table.push([
-                            [this.unionMemberJsonValueGuard(t, "jv.inside")],
-                            [
-                                " -> ",
-                                name,
-                                "(",
-                                this.unionMemberFromJsonValue(t, "jv"),
-                                "!!)",
-                            ],
-                        ]);
+                        const guard = this.sourcelikeToString(
+                            this.unionMemberJsonValueGuard(t, u),
+                        );
+                        const group = groups.find((g) => g.guard === guard);
+                        if (group === undefined) {
+                            groups.push({ guard, members: [{ name, t }] });
+                        } else {
+                            group.members.push({ name, t });
+                        }
                     },
                 );
+                const table: Sourcelike[][] = [];
+                for (const { guard, members } of groups) {
+                    const ordered = [...members].sort(
+                        (a, b) =>
+                            unionMemberMatchPriority(a.t) -
+                            unionMemberMatchPriority(b.t),
+                    );
+                    const last = ordered[ordered.length - 1];
+                    let expr: Sourcelike = [
+                        last.name,
+                        "(",
+                        this.unionMemberFromJsonValue(last.t, "jv"),
+                        "!!)",
+                    ];
+                    for (let i = ordered.length - 2; i >= 0; i--) {
+                        expr = [
+                            "try { ",
+                            ordered[i].name,
+                            "(",
+                            this.unionMemberFromJsonValue(ordered[i].t, "jv"),
+                            "!!) } catch (e: Exception) { ",
+                            expr,
+                            " }",
+                        ];
+                    }
+
+                    table.push([[guard], [" -> ", expr]]);
+                }
+
                 if (maybeNull !== null) {
                     const name = this.nameForUnionMember(u, maybeNull);
                     table.push([
-                        [
-                            this.unionMemberJsonValueGuard(
-                                maybeNull,
-                                "jv.inside",
-                            ),
-                        ],
+                        [this.unionMemberJsonValueGuard(maybeNull, u)],
                         [" -> ", name, "()"],
                     ]);
                 }

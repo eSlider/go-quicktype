@@ -1,12 +1,12 @@
-import * as os from "os";
+import * as os from "node:os";
 import * as _ from "lodash";
 
-import { inParallel } from "./lib/multicore";
-import { execAsync, type Sample } from "./utils";
-import { type Fixture, allFixtures } from "./fixtures";
 import { affectedFixtures, divideParallelJobs } from "./buildkite";
+import { type Fixture, allFixtures } from "./fixtures";
+import { inParallel } from "./lib/multicore";
+import { type Sample, execAsync } from "./utils";
 
-const exit = require("exit");
+// biome-ignore lint/style/useExplicitLengthCheck: length is used as a value here, not a boolean
 const CPUs = Number.parseInt(process.env.CPUs || "0", 10) || os.cpus().length;
 
 //////////////////////////////////////
@@ -16,7 +16,10 @@ const CPUs = Number.parseInt(process.env.CPUs || "0", 10) || os.cpus().length;
 export type WorkItem = { sample: Sample; fixtureName: string };
 
 async function main(sources: string[]) {
-    let fixtures = affectedFixtures();
+    let fixtures =
+        process.env.ALL_FIXTURES === undefined
+            ? affectedFixtures()
+            : allFixtures;
     const fixturesFromCmdline = process.env.FIXTURE;
     if (fixturesFromCmdline) {
         const fixtureNames = fixturesFromCmdline.split(",");
@@ -63,8 +66,8 @@ async function main(sources: string[]) {
             );
 
             for (const fixture of fixtures) {
-                await execAsync(`rm -rf test/runs`);
-                await execAsync(`mkdir -p test/runs`);
+                await execAsync("rm -rf test/runs");
+                await execAsync("mkdir -p test/runs");
 
                 await fixture.setup();
             }
@@ -76,7 +79,7 @@ async function main(sources: string[]) {
                 await fixture.runWithSample(sample, index, tests.length);
             } catch (e) {
                 console.trace(e);
-                exit(1);
+                process.exit(1);
             }
         },
     });

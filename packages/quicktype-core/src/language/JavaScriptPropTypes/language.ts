@@ -1,11 +1,20 @@
-import type { RenderContext } from "../../Renderer";
-import { EnumOption, getOptionValues } from "../../RendererOptions";
-import { AcronymStyleOptions, acronymOption } from "../../support/Acronyms";
-import { convertersOption } from "../../support/Converters";
-import { TargetLanguage } from "../../TargetLanguage";
-import type { LanguageName, RendererOptions } from "../../types";
+import type { RenderContext } from "../../Renderer.js";
+import { EnumOption, getOptionValues } from "../../RendererOptions/index.js";
+import { AcronymStyleOptions, acronymOption } from "../../support/Acronyms.js";
+import { convertersOption } from "../../support/Converters.js";
+import {
+    JS_SAFE_INTEGER_RANGE,
+    type IntegerRange,
+} from "../../support/IntegerRange.js";
+import { TargetLanguage } from "../../TargetLanguage.js";
+import type { StringTypeMapping } from "../../Type/TypeBuilderUtils.js";
+import type {
+    PrimitiveStringTypeKind,
+    TransformedStringTypeKind,
+} from "../../Type/index.js";
+import type { LanguageName, RendererOptions } from "../../types.js";
 
-import { JavaScriptPropTypesRenderer } from "./JavaScriptPropTypesRenderer";
+import { JavaScriptPropTypesRenderer } from "./JavaScriptPropTypesRenderer.js";
 
 export const javaScriptPropTypesOptions = {
     acronymStyle: acronymOption(AcronymStyleOptions.Pascal),
@@ -30,12 +39,25 @@ export const javaScriptPropTypesLanguageConfig = {
 export class JavaScriptPropTypesTargetLanguage extends TargetLanguage<
     typeof javaScriptPropTypesLanguageConfig
 > {
+    public getSupportedIntegerRange(): IntegerRange | null {
+        return JS_SAFE_INTEGER_RANGE;
+    }
+
     public constructor() {
         super(javaScriptPropTypesLanguageConfig);
     }
 
     public getOptions(): typeof javaScriptPropTypesOptions {
         return javaScriptPropTypesOptions;
+    }
+
+    public get stringTypeMapping(): StringTypeMapping {
+        const mapping: Map<TransformedStringTypeKind, PrimitiveStringTypeKind> =
+            new Map();
+        mapping.set("uuid", "uuid");
+        mapping.set("date", "date-time");
+        mapping.set("date-time", "date-time");
+        return mapping;
     }
 
     protected makeRenderer<Lang extends LanguageName = "javascript-prop-types">(

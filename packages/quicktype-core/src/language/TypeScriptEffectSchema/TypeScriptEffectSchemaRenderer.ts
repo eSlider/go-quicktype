@@ -1,11 +1,17 @@
 import { arrayIntercalate } from "collection-utils";
 
-import { ConvenienceRenderer } from "../../ConvenienceRenderer";
-import { type Name, type Namer, funPrefixNamer } from "../../Naming";
-import type { RenderContext } from "../../Renderer";
-import type { OptionValues } from "../../RendererOptions";
-import type { Sourcelike } from "../../Source";
-import { AcronymStyleOptions, acronymStyle } from "../../support/Acronyms";
+import {
+    minMaxItemsForType,
+    minMaxLengthForType,
+    minMaxValueForType,
+    patternForType,
+} from "../../attributes/Constraints.js";
+import { ConvenienceRenderer } from "../../ConvenienceRenderer.js";
+import { type Name, type Namer, funPrefixNamer } from "../../Naming.js";
+import type { RenderContext } from "../../Renderer.js";
+import type { OptionValues } from "../../RendererOptions/index.js";
+import type { Sourcelike } from "../../Source.js";
+import { AcronymStyleOptions, acronymStyle } from "../../support/Acronyms.js";
 import {
     allLowerWordStyle,
     capitalize,
@@ -15,9 +21,9 @@ import {
     splitIntoWords,
     stringEscape,
     utf16StringEscape,
-} from "../../support/Strings";
-import { panic } from "../../support/Support";
-import type { TargetLanguage } from "../../TargetLanguage";
+} from "../../support/Strings.js";
+import { panic } from "../../support/Support.js";
+import type { TargetLanguage } from "../../TargetLanguage.js";
 import {
     ArrayType,
     type ClassProperty,
@@ -25,14 +31,14 @@ import {
     MapType,
     type ObjectType,
     type Type,
-} from "../../Type";
-import { matchType } from "../../Type/TypeUtils";
-import { legalizeName } from "../JavaScript/utils";
+} from "../../Type/index.js";
+import { matchType } from "../../Type/TypeUtils.js";
+import { legalizeName } from "../JavaScript/utils.js";
 
-import type { typeScriptEffectSchemaOptions } from "./language";
+import type { typeScriptEffectSchemaOptions } from "./language.js";
 
 export class TypeScriptEffectSchemaRenderer extends ConvenienceRenderer {
-    private emittedObjects = new Set<Name>();
+    private readonly emittedObjects = new Set<Name>();
 
     public constructor(
         targetLanguage: TargetLanguage,
@@ -99,7 +105,11 @@ export class TypeScriptEffectSchemaRenderer extends ConvenienceRenderer {
         return ["S.optional(", this.typeMapTypeFor(p.type), ")"];
     }
 
-    private typeMapTypeFor(t: Type, required = true): Sourcelike {
+    private typeMapTypeFor(
+        t: Type,
+        required = true,
+        coerceStrings = false,
+    ): Sourcelike {
         if (t.kind === "class" || t.kind === "object" || t.kind === "enum") {
             const name = this.nameForNamedType(t);
             if (this.emittedObjects.has(name)) {
@@ -114,14 +124,25 @@ export class TypeScriptEffectSchemaRenderer extends ConvenienceRenderer {
             (_anyType) => "S.Any",
             (_nullType) => "S.Null",
             (_boolType) => "S.Boolean",
-            (_integerType) => "S.Number",
-            (_doubleType) => "S.Number",
-            (_stringType) => "S.String",
-            (arrayType) => [
-                "S.Array(",
-                this.typeMapTypeFor(arrayType.items, false),
-                ")",
-            ],
+            (integerType) => this.numberSchema(integerType, "S.Int"),
+            (doubleType) => this.numberSchema(doubleType, "S.Number"),
+            (stringType) => this.stringSchema(stringType),
+            (arrayType) => {
+                const [minItems, maxItems] =
+                    minMaxItemsForType(arrayType) ?? [];
+                const schema: Sourcelike[] = [
+                    "S.Array(",
+                    this.typeMapTypeFor(arrayType.items, false),
+                    ")",
+                ];
+                if (minItems !== undefined && minItems > 0) {
+                    schema.push(".pipe(S.minItems(", minItems.toString(), "))");
+                }
+                if (maxItems !== undefined) {
+                    schema.push(".pipe(S.maxItems(", maxItems.toString(), "))");
+                }
+                return schema;
+            },
             (_classType) => panic("Should already be handled."),
             (_mapType) => [
                 "S.Record({ key: S.String, value: ",
@@ -131,13 +152,19 @@ export class TypeScriptEffectSchemaRenderer extends ConvenienceRenderer {
             (_enumType) => panic("Should already be handled."),
             (unionType) => {
                 const types = Array.from(unionType.getChildren());
+                const coerce = types.some(
+                    (type) => type.kind === "bool" || type.kind === "integer",
+                );
+                const rank = (type: Type): number =>
+                    type.kind === "class" || type.kind === "object" ? 1 : 0;
+                types.sort((a, b) => rank(a) - rank(b));
                 const children: Sourcelike[] = [];
                 let nullable = false;
                 for (const type of types) {
                     if (type.kind === "null") {
                         nullable = true;
                     } else {
-                        children.push(this.typeMapTypeFor(type, false));
+                        children.push(this.typeMapTypeFor(type, false, coerce));
                     }
                 }
 
@@ -152,6 +179,21 @@ export class TypeScriptEffectSchemaRenderer extends ConvenienceRenderer {
                 ];
             },
             (_transformedStringType) => {
+                if (_transformedStringType.kind === "uuid") return "S.UUID";
+                if (_transformedStringType.kind === "bool-string")
+                    return coerceStrings
+                        ? 'S.transform(S.Literal("true", "false"), S.Boolean, { strict: true, decode: (value) => value === "true", encode: (value) => value ? "true" : "false" })'
+                        : 'S.Literal("true", "false")';
+                if (_transformedStringType.kind === "date")
+                    return "S.String.pipe(S.pattern(/^\\d{4}-\\d{2}-\\d{2}$/))";
+                if (_transformedStringType.kind === "time")
+                    return "S.String.pipe(S.pattern(/^\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$/))";
+                if (_transformedStringType.kind === "date-time")
+                    return "S.String.pipe(S.pattern(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$/))";
+                if (_transformedStringType.kind === "integer-string")
+                    return coerceStrings
+                        ? "S.NumberFromString.pipe(S.int())"
+                        : "S.String.pipe(S.pattern(/^-?\\d+$/))";
                 return "S.String";
             },
         );
@@ -163,8 +205,32 @@ export class TypeScriptEffectSchemaRenderer extends ConvenienceRenderer {
         return match;
     }
 
+    private stringSchema(t: Type): Sourcelike {
+        const [min, max] = minMaxLengthForType(t) ?? [];
+        const pattern = patternForType(t);
+        const schema: Sourcelike[] = ["S.String"];
+        if (min !== undefined)
+            schema.push(".pipe(S.minLength(", min.toString(), "))");
+        if (max !== undefined)
+            schema.push(".pipe(S.maxLength(", max.toString(), "))");
+        if (pattern !== undefined)
+            schema.push(
+                `.pipe(S.pattern(new RegExp(${JSON.stringify(pattern)})))`,
+            );
+        return schema;
+    }
+
+    private numberSchema(t: Type, base: string): Sourcelike {
+        const [min, max] = minMaxValueForType(t) ?? [];
+        const schema: Sourcelike[] = [base];
+        if (min !== undefined)
+            schema.push(".pipe(S.greaterThanOrEqualTo(", min.toString(), "))");
+        if (max !== undefined)
+            schema.push(".pipe(S.lessThanOrEqualTo(", max.toString(), "))");
+        return schema;
+    }
+
     private emitObject(name: Name, t: ObjectType): void {
-        this.emittedObjects.add(name);
         this.ensureBlankLine();
         this.emitLine(
             "\nexport class ",
@@ -186,6 +252,7 @@ export class TypeScriptEffectSchemaRenderer extends ConvenienceRenderer {
             });
         });
         this.emitLine("}) {}");
+        this.emittedObjects.add(name);
     }
 
     private emitEnum(e: EnumType, enumName: Name): void {
@@ -212,8 +279,11 @@ export class TypeScriptEffectSchemaRenderer extends ConvenienceRenderer {
 
     protected walkObjectNames(objectType: ObjectType): Name[] {
         const names: Name[] = [];
+        const visited = new Set<Type>();
 
         const recurse = (type: Type): void => {
+            if (visited.has(type)) return;
+            visited.add(type);
             if (type.kind === "object" || type.kind === "class") {
                 names.push(this.nameForNamedType(type));
                 this.forEachClassProperty(
@@ -286,13 +356,25 @@ export class TypeScriptEffectSchemaRenderer extends ConvenienceRenderer {
         });
 
         // now emit ordered source
-        order.forEach((i) =>
+        order.forEach((i) => {
             this.emitGatheredSource(
-                this.gatherSource(() =>
-                    this.emitObject(mapKey[i], mapValue[i]),
-                ),
-            ),
-        );
+                this.gatherSource(() => {
+                    this.emitObject(mapKey[i], mapValue[i]);
+                }),
+            );
+        });
+
+        this.forEachTopLevel("none", (type, name) => {
+            if (["class", "object", "enum"].includes(type.kind)) return;
+
+            this.ensureBlankLine();
+            const schema = this.typeMapTypeFor(type);
+            this.emitLine(["export const ", name, " = ", schema, ";"]);
+            if (!this._options.justSchema) {
+                const typeOf = " = S.Schema.Type<typeof ";
+                this.emitLine(["export type ", name, typeOf, name, ">;"]);
+            }
+        });
     }
 
     protected emitSourceStructure(): void {

@@ -13,7 +13,7 @@ import {
     setUnionInto,
 } from "collection-utils";
 
-import { assert, defined, panic } from "./support/Support";
+import { assert, defined, panic } from "./support/Support.js";
 
 export class Namespace {
     public readonly forbiddenNamespaces: ReadonlySet<Namespace>;
@@ -23,6 +23,8 @@ export class Namespace {
     private readonly _children = new Set<Namespace>();
 
     private readonly _members = new Set<Name>();
+
+    private _forbiddenNameds: ReadonlySet<Name> | undefined;
 
     public constructor(
         _name: string,
@@ -50,11 +52,14 @@ export class Namespace {
     }
 
     public get forbiddenNameds(): ReadonlySet<Name> {
-        // FIXME: cache
-        return setUnion(
-            this.additionalForbidden,
-            ...Array.from(this.forbiddenNamespaces).map((ns) => ns.members),
-        );
+        if (this._forbiddenNameds === undefined) {
+            this._forbiddenNameds = setUnion(
+                this.additionalForbidden,
+                ...Array.from(this.forbiddenNamespaces).map((ns) => ns.members),
+            );
+        }
+
+        return this._forbiddenNameds;
     }
 
     public add<TName extends Name>(named: TName): TName {
@@ -87,6 +92,7 @@ export class Namer {
         public readonly name: string,
         public readonly nameStyle: NameStyle,
         public prefixes: string[],
+        private readonly _caseInsensitiveStyledNames = false,
     ) {
         this._prefixes = new Set(prefixes);
     }
@@ -99,6 +105,16 @@ export class Namer {
         namesToAssignIterable: Iterable<Name>,
     ): ReadonlyMap<Name, string> {
         const forbiddenNames = new Set(forbiddenNamesIterable);
+        const isForbidden = (candidate: string): boolean =>
+            iterableSome(
+                forbiddenNames,
+                (name) =>
+                    name === candidate ||
+                    (this._caseInsensitiveStyledNames &&
+                        name === this.nameStyle(name) &&
+                        candidate === this.nameStyle(candidate) &&
+                        name.toLowerCase() === candidate.toLowerCase()),
+            );
         const namesToAssign = Array.from(namesToAssignIterable);
 
         assert(
@@ -117,7 +133,7 @@ export class Namer {
             const maybeUniqueName = iterableFind(
                 proposedNames,
                 (proposed) =>
-                    !forbiddenNames.has(namingFunction.nameStyle(proposed)) &&
+                    !isForbidden(namingFunction.nameStyle(proposed)) &&
                     namesToAssign.every(
                         (n) =>
                             n === name ||
@@ -451,17 +467,23 @@ export function assignNames(
         }
     }
 
+    const unfinishedNamespaces = setFilter(ctx.namespaces, (ns) =>
+        iterableSome(ns.members, (member) => !ctx.names.has(member)),
+    );
+
     for (;;) {
         // 1. Find a namespace whose forbiddens are all fully named, and which has
         //    at least one unnamed Named that has all its dependencies satisfied.
         //    If no such namespace exists we're either done, or there's an unallowed
         //    cycle.
 
-        const unfinishedNamespaces = setFilter(ctx.namespaces, (ns) =>
-            ctx.areForbiddensFullyNamed(ns),
-        );
-        const readyNamespace = iterableFind(unfinishedNamespaces, (ns) =>
-            iterableSome(ns.members, (member) => ctx.isReadyToBeNamed(member)),
+        const readyNamespace = iterableFind(
+            unfinishedNamespaces,
+            (ns) =>
+                ctx.areForbiddensFullyNamed(ns) &&
+                iterableSome(ns.members, (member) =>
+                    ctx.isReadyToBeNamed(member),
+                ),
         );
 
         if (readyNamespace === undefined) {
@@ -518,6 +540,14 @@ export function assignNames(
                     setUnionInto(forbiddenNames, names.values());
                 }
             }
+        }
+
+        if (
+            iterableEvery(readyNamespace.members, (member) =>
+                ctx.names.has(member),
+            )
+        ) {
+            unfinishedNamespaces.delete(readyNamespace);
         }
     }
 }

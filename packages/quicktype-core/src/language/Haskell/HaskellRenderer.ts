@@ -3,31 +3,39 @@ import { mapContains } from "collection-utils";
 import {
     ConvenienceRenderer,
     type ForbiddenWordsInfo,
-} from "../../ConvenienceRenderer";
-import type { Name, Namer } from "../../Naming";
-import type { RenderContext } from "../../Renderer";
-import type { OptionValues } from "../../RendererOptions";
+} from "../../ConvenienceRenderer.js";
+import { DependencyName, type Name, type Namer } from "../../Naming.js";
+import type { RenderContext } from "../../Renderer.js";
+import type { OptionValues } from "../../RendererOptions/index.js";
 import {
     type MultiWord,
     type Sourcelike,
     multiWord,
     parenIfNeeded,
     singleWord,
-} from "../../Source";
-import { stringEscape } from "../../support/Strings";
-import type { TargetLanguage } from "../../TargetLanguage";
+} from "../../Source.js";
+import { stringEscape } from "../../support/Strings.js";
+import type { TargetLanguage } from "../../TargetLanguage.js";
 import type {
     ClassProperty,
     ClassType,
     EnumType,
     Type,
     UnionType,
-} from "../../Type";
-import { matchType, nullableFromUnion } from "../../Type/TypeUtils";
+} from "../../Type/index.js";
+import { matchType, nullableFromUnion } from "../../Type/TypeUtils.js";
 
-import { forbiddenNames } from "./constants";
-import type { haskellOptions } from "./language";
-import { lowerNamingFunction, upperNamingFunction } from "./utils";
+import { forbiddenNames } from "./constants.js";
+import type { haskellOptions } from "./language.js";
+import { lowerNamingFunction, upperNamingFunction } from "./utils.js";
+
+function haskellStringEscape(s: string): string {
+    return stringEscape(s).replace(
+        /\\u([0-9a-fA-F]{4})|\\U([0-9a-fA-F]{8})/g,
+        (_match, bmp: string | undefined, astral: string | undefined) =>
+            `\\x${bmp ?? astral}\\&`,
+    );
+}
 
 export class HaskellRenderer extends ConvenienceRenderer {
     public constructor(
@@ -73,6 +81,26 @@ export class HaskellRenderer extends ConvenienceRenderer {
         return true;
     }
 
+    protected makeNameForEnumCase(
+        e: EnumType,
+        enumName: Name,
+        caseName: string,
+        assignedName: string | undefined,
+    ): Name {
+        const name = super.makeNameForEnumCase(
+            e,
+            enumName,
+            caseName,
+            assignedName,
+        );
+        const proposedName = name.firstProposedName(new Map());
+        return new DependencyName(
+            name.namingFunction,
+            name.order,
+            (lookup) => `${proposedName}_${lookup(enumName)}`,
+        );
+    }
+
     protected proposeUnionMemberName(
         u: UnionType,
         unionName: Name,
@@ -109,11 +137,11 @@ export class HaskellRenderer extends ConvenienceRenderer {
     private haskellType(t: Type, noOptional = false): MultiWord {
         return matchType<MultiWord>(
             t,
-            (_anyType) => multiWord(" ", "Maybe", "Text"),
+            (_anyType) => singleWord("Value"),
             (_nullType) => multiWord(" ", "Maybe", "Text"),
             (_boolType) => singleWord("Bool"),
             (_integerType) => singleWord("Int"),
-            (_doubleType) => singleWord("Float"),
+            (_doubleType) => singleWord("Double"),
             (_stringType) => singleWord("Text"),
             (arrayType) => {
                 if (this._options.useList) {
@@ -176,7 +204,7 @@ export class HaskellRenderer extends ConvenienceRenderer {
             (_arrayType) => singleWord("Array"),
             (_classType) => singleWord("Object"),
             (_mapType) => singleWord("Object"),
-            (_enumType) => singleWord("Object"),
+            (_enumType) => singleWord("String"),
             (_unionType) => singleWord("Object"),
         );
     }
@@ -226,6 +254,10 @@ export class HaskellRenderer extends ConvenienceRenderer {
         });
     }
 
+    private enumCaseName(name: Name, enumName: Name): Sourcelike {
+        return name instanceof DependencyName ? name : [name, enumName];
+    }
+
     private emitEnumDefinition(e: EnumType, enumName: Name): void {
         this.emitDescription(this.descriptionForType(e));
         this.emitLine("data ", enumName);
@@ -233,7 +265,11 @@ export class HaskellRenderer extends ConvenienceRenderer {
             let onFirst = true;
             this.forEachEnumCase(e, "none", (name) => {
                 const equalsOrPipe = onFirst ? "=" : "|";
-                this.emitLine(equalsOrPipe, " ", name, enumName);
+                this.emitLine(
+                    equalsOrPipe,
+                    " ",
+                    this.enumCaseName(name, enumName),
+                );
                 onFirst = false;
             });
             this.emitLine("deriving (Show)");
@@ -299,7 +335,7 @@ export class HaskellRenderer extends ConvenienceRenderer {
                         this.emitLine(
                             onFirst ? "[ " : ", ",
                             '"',
-                            stringEscape(jsonName),
+                            haskellStringEscape(jsonName),
                             '" .= ',
                             name,
                             className,
@@ -333,7 +369,7 @@ export class HaskellRenderer extends ConvenienceRenderer {
                             "v ",
                             operator,
                             ' "',
-                            stringEscape(jsonName),
+                            haskellStringEscape(jsonName),
                             '"',
                         );
                         onFirst = false;
@@ -355,10 +391,9 @@ export class HaskellRenderer extends ConvenienceRenderer {
             this.forEachEnumCase(e, "none", (name, jsonName) => {
                 this.emitLine(
                     "toJSON ",
-                    name,
-                    enumName,
+                    this.enumCaseName(name, enumName),
                     ' = "',
-                    stringEscape(jsonName),
+                    haskellStringEscape(jsonName),
                     '"',
                 );
             });
@@ -375,10 +410,9 @@ export class HaskellRenderer extends ConvenienceRenderer {
                     this.forEachEnumCase(e, "none", (name, jsonName) => {
                         this.emitLine(
                             'parseText "',
-                            stringEscape(jsonName),
+                            haskellStringEscape(jsonName),
                             '" = return ',
-                            name,
-                            enumName,
+                            this.enumCaseName(name, enumName),
                         );
                     });
                 });

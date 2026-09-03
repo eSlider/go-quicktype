@@ -11,37 +11,39 @@ import {
 import {
     anyTypeIssueAnnotation,
     nullTypeIssueAnnotation,
-} from "../../Annotation";
-import { getAccessorName } from "../../attributes/AccessorNames";
-import { enumCaseValues } from "../../attributes/EnumValues";
+} from "../../Annotation.js";
+import { getAccessorName } from "../../attributes/AccessorNames.js";
+import { defaultValueForType } from "../../attributes/DefaultValue.js";
+import { enumCaseValues } from "../../attributes/EnumValues.js";
+import { minMaxItemsForType } from "../../attributes/Constraints.js";
 import {
     ConvenienceRenderer,
     type ForbiddenWordsInfo,
-} from "../../ConvenienceRenderer";
-import type { Declaration } from "../../DeclarationIR";
+} from "../../ConvenienceRenderer.js";
+import type { Declaration } from "../../DeclarationIR.js";
 import {
     DependencyName,
     type Name,
     type NameStyle,
     type Namer,
     funPrefixNamer,
-} from "../../Naming";
-import type { RenderContext } from "../../Renderer";
-import type { OptionValues } from "../../RendererOptions";
-import { type Sourcelike, maybeAnnotated } from "../../Source";
+} from "../../Naming.js";
+import type { RenderContext } from "../../Renderer.js";
+import type { OptionValues } from "../../RendererOptions/index.js";
+import { type Sourcelike, maybeAnnotated } from "../../Source.js";
 import {
     type NamingStyle,
     makeNameStyle,
     stringEscape,
-} from "../../support/Strings";
+} from "../../support/Strings.js";
 import {
     assert,
     assertNever,
     defined,
     numberEnumValues,
     panic,
-} from "../../support/Support";
-import type { TargetLanguage } from "../../TargetLanguage";
+} from "../../support/Support.js";
+import type { TargetLanguage } from "../../TargetLanguage.js";
 import {
     ArrayType,
     type ClassProperty,
@@ -50,17 +52,17 @@ import {
     MapType,
     type Type,
     UnionType,
-} from "../../Type";
+} from "../../Type/index.js";
 import {
     directlyReachableTypes,
     isNamedType,
     matchType,
     nullableFromUnion,
     removeNullFromUnion,
-} from "../../Type/TypeUtils";
+} from "../../Type/TypeUtils.js";
 
-import { keywords } from "./constants";
-import type { cPlusPlusOptions } from "./language";
+import { keywords } from "./constants.js";
+import type { cPlusPlusOptions } from "./language.js";
 import {
     BaseString,
     type ConstraintMember,
@@ -78,7 +80,7 @@ import {
     legalizeName,
     optionalAsSharedType,
     optionalFactoryAsSharedType,
-} from "./utils";
+} from "./utils.js";
 
 export class CPlusPlusRenderer extends ConvenienceRenderer {
     /**
@@ -254,9 +256,58 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
         return !this.isCycleBreakerType(t);
     }
 
+    private typeContainsUnion(t: Type, visited = new Set<Type>()): boolean {
+        if (t instanceof UnionType) return true;
+        if (visited.has(t)) return false;
+
+        visited.add(t);
+        return iterableSome(t.getChildren(), (child) =>
+            this.typeContainsUnion(child, visited),
+        );
+    }
+
+    private typeReaches(
+        t: Type,
+        target: Type,
+        visited = new Set<Type>(),
+    ): boolean {
+        if (t === target) return true;
+        if (visited.has(t)) return false;
+
+        visited.add(t);
+        return iterableSome(t.getChildren(), (child) =>
+            this.typeReaches(child, target, visited),
+        );
+    }
+
+    private isRecursiveUnion(u: UnionType): boolean {
+        return iterableSome(u.getChildren(), (child) =>
+            this.typeReaches(child, u),
+        );
+    }
+
+    private recursiveUnionUsesStackOptional(u: UnionType): boolean {
+        const [maybeNull] = removeNullFromUnion(u, true);
+        return (
+            this.isRecursiveUnion(u) &&
+            maybeNull !== null &&
+            this.isOptionalAsValuePossible(u)
+        );
+    }
+
     public isImplicitCycleBreaker(t: Type): boolean {
+        // Containers break completeness cycles for classes, but not for type
+        // aliases: an alias name is not in scope on its own right-hand side.
         const kind = t.kind;
-        return kind === "array" || kind === "map";
+        if (kind !== "array" && kind !== "map") return false;
+
+        return !iterableSome(t.getChildren(), (child) =>
+            this.typeContainsUnion(child),
+        );
+    }
+
+    protected canBreakCycles(t: Type): boolean {
+        return t instanceof ClassType || t instanceof UnionType;
     }
 
     // Is likely to return std::optional or boost::optional
@@ -503,21 +554,13 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
                 "",
             ]);
 
-            if (this._options.typeSourceStyle) {
-                this.forEachTopLevel("none", (_, topLevelName) => {
-                    this.emitLine(
-                        "//     ",
-                        topLevelName,
-                        " data = nlohmann::json::parse(jsonString);",
-                    );
-                });
-            } else {
+            this.forEachTopLevel("none", (_, topLevelName) => {
                 this.emitLine(
                     "//     ",
-                    basename,
+                    topLevelName,
                     " data = nlohmann::json::parse(jsonString);",
                 );
-            }
+            });
 
             if (this._options.wstring) {
                 this.emitLine("//");
@@ -541,7 +584,13 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
         this.emitLine("#pragma once");
         this.ensureBlankLine();
 
-        if (this.haveOptionalProperties) {
+        if (
+            this.haveOptionalProperties ||
+            (!this._options.codeFormat &&
+                iterableSome(this.namedUnions, (u) =>
+                    this.recursiveUnionUsesStackOptional(u),
+                ))
+        ) {
             if (this._options.boost) {
                 this.emitInclude(true, "boost/optional.hpp");
             } else {
@@ -584,6 +633,10 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
     protected canBeForwardDeclared(t: Type): boolean {
         const kind = t.kind;
         return kind === "class";
+    }
+
+    protected get commentLinesSpliceOnBackslash(): boolean {
+        return true;
     }
 
     protected emitDescriptionBlock(lines: Sourcelike[]): void {
@@ -652,7 +705,7 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
 
         const typeList: Sourcelike = [];
         for (const t of nonNulls) {
-            if (typeList.length !== 0) {
+            if (typeList.length > 0) {
                 typeList.push(", ");
             }
 
@@ -837,6 +890,7 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
                     this.nameForNamedType(unionType),
                 ];
             },
+            (_transformedStringType) => this._stringType.getType(),
         );
         if (!isOptional) return typeSource;
         return [this.optionalType(t), "<", typeSource, ">"];
@@ -921,8 +975,41 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
         return this._memberNameStyle(`${jsonName}Constraint`);
     }
 
-    protected emitMember(cppType: Sourcelike, name: Sourcelike): void {
-        this.emitLine(cppType, " ", name, ";");
+    protected emitMember(
+        cppType: Sourcelike,
+        name: Sourcelike,
+        defaultValue?: Sourcelike,
+    ): void {
+        this.emitLine(
+            cppType,
+            " ",
+            name,
+            defaultValue === undefined ? [] : [" = ", defaultValue],
+            ";",
+        );
+    }
+
+    protected cppDefaultValue(t: Type): Sourcelike | undefined {
+        const defaultValue = defaultValueForType(t);
+        if (defaultValue === undefined) return undefined;
+
+        if (defaultValue === null) return "nullptr";
+        if (typeof defaultValue === "boolean") {
+            return defaultValue ? "true" : "false";
+        }
+
+        if (typeof defaultValue === "number") return String(defaultValue);
+        if (t instanceof EnumType && t.cases.has(defaultValue)) {
+            return [
+                this.nameForNamedType(t),
+                "::",
+                this.nameForEnumCase(t, defaultValue),
+            ];
+        }
+
+        return this._stringType.createStringLiteral([
+            stringEscape(defaultValue),
+        ]);
     }
 
     protected emitClassMembers(
@@ -946,6 +1033,7 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
                         property.isOptional,
                     ),
                     name,
+                    this.cppDefaultValue(property.type),
                 );
                 if (constraints?.has(jsonName)) {
                     /** FIXME!!! NameStyle will/can collide with other Names */
@@ -976,6 +1064,7 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
                         property.isOptional,
                     ),
                     name,
+                    this.cppDefaultValue(property.type),
                 );
             } else {
                 const [getterName, mutableGetterName, setterName] = defined(
@@ -1002,11 +1091,8 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
                     GlobalNames.CheckConstraint,
                 );
                 if (
-                    (property.type instanceof UnionType &&
-                        property.type.findMember("null") !== undefined) ||
-                    (property.isOptional &&
-                        property.type.kind !== "null" &&
-                        property.type.kind !== "any")
+                    property.type instanceof UnionType &&
+                    property.type.findMember("null") !== undefined
                 ) {
                     this.emitLine(
                         rendered,
@@ -1104,6 +1190,10 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
             const { minMax, minMaxLength, pattern } = constraints;
 
             // TODO is there a better way to check if property.type is an integer or a number?
+            // We only generate this to classify the underlying type, so we
+            // always pass `false` for `isOptional` — otherwise `cppType`
+            // wraps the type in the optional<> container and the comparisons
+            // below never match.
             const cppType = this.cppType(
                 property.type,
                 {
@@ -1113,31 +1203,37 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
                 },
                 true,
                 false,
-                property.isOptional,
+                false,
             );
 
+            // Compare bounds against `undefined` explicitly, since 0 is a
+            // valid constraint value too.
             res.set(jsonName, [
                 this.constraintMember(jsonName),
                 "(",
-                minMax?.[0] && cppType === "int64_t"
+                minMax?.[0] !== undefined && cppType === "int64_t"
                     ? String(minMax[0])
                     : this._nulloptType,
                 ", ",
-                minMax?.[1] && cppType === "int64_t"
+                minMax?.[1] !== undefined && cppType === "int64_t"
                     ? String(minMax[1])
                     : this._nulloptType,
                 ", ",
-                minMax?.[0] && cppType === "double"
+                minMax?.[0] !== undefined && cppType === "double"
                     ? String(minMax[0])
                     : this._nulloptType,
                 ", ",
-                minMax?.[1] && cppType === "double"
+                minMax?.[1] !== undefined && cppType === "double"
                     ? String(minMax[1])
                     : this._nulloptType,
                 ", ",
-                minMaxLength?.[0] ? String(minMaxLength[0]) : this._nulloptType,
+                minMaxLength?.[0] !== undefined
+                    ? String(minMaxLength[0])
+                    : this._nulloptType,
                 ", ",
-                minMaxLength?.[1] ? String(minMaxLength[1]) : this._nulloptType,
+                minMaxLength?.[1] !== undefined
+                    ? String(minMaxLength[1])
+                    : this._nulloptType,
                 ", ",
                 pattern === undefined
                     ? this._nulloptType
@@ -1362,6 +1458,14 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
             ],
             false,
             () => {
+                this.emitLine(
+                    'if (!j.is_object()) throw std::runtime_error("Expected object");',
+                );
+                if (c.getProperties().size === 0) {
+                    this.emitLine("(void)j;");
+                    this.emitLine("(void)x;");
+                }
+
                 this.forEachClassProperty(c, "none", (name, json, p) => {
                     const [, , setterName] = defined(
                         this._gettersAndSettersForPropertyName.get(name),
@@ -1403,6 +1507,73 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
                         return;
                     }
 
+                    if (propType.kind === "integer") {
+                        const key = this.NarrowString.createStringLiteral([
+                            stringEscape(json),
+                        ]);
+                        this.emitLine(
+                            "if (j.find(",
+                            key,
+                            ") != j.end() && !j.at(",
+                            key,
+                            ').is_number_integer()) throw std::runtime_error("Expected integer");',
+                        );
+                    }
+
+                    if (propType.kind === "uuid") {
+                        const key = this.NarrowString.createStringLiteral([
+                            stringEscape(json),
+                        ]);
+                        this.emitLine(
+                            "if (j.find(",
+                            key,
+                            ") != j.end() && !std::regex_match(j.at(",
+                            key,
+                            ').get<std::string>(), std::regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))) throw std::runtime_error("Expected UUID");',
+                        );
+                    }
+
+                    if (propType.kind === "date-time") {
+                        const key = this.NarrowString.createStringLiteral([
+                            stringEscape(json),
+                        ]);
+                        this.emitLine(
+                            "if (j.find(",
+                            key,
+                            ") != j.end() && !std::regex_match(j.at(",
+                            key,
+                            ').get<std::string>(), std::regex("^[0-9]{4}-[0-9]{2}-[0-9]{2}T.*$"))) throw std::runtime_error("Expected date-time");',
+                        );
+                    }
+
+                    const minMaxItems = minMaxItemsForType(propType);
+                    if (minMaxItems !== undefined) {
+                        const [minItems, maxItems] = minMaxItems;
+                        const key = this.sourcelikeToString(
+                            this.NarrowString.createStringLiteral([
+                                stringEscape(json),
+                            ]),
+                        );
+                        if (minItems !== undefined)
+                            this.emitLine(
+                                `if (j.at(${key}).size() < ${minItems}) throw std::runtime_error("Too few items");`,
+                            );
+                        if (maxItems !== undefined)
+                            this.emitLine(
+                                `if (j.at(${key}).size() > ${maxItems}) throw std::runtime_error("Too many items");`,
+                            );
+                    }
+
+                    if (!p.isOptional && propType.isNullable) {
+                        this.emitLine(
+                            "j.at(",
+                            this.NarrowString.createStringLiteral([
+                                stringEscape(json),
+                            ]),
+                            ");",
+                        );
+                    }
+
                     if (p.isOptional || propType instanceof UnionType) {
                         const [nullOrOptional, typeSet] = ((): [
                             boolean,
@@ -1421,9 +1592,61 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
                             set.add(propType);
                             return [true, set];
                         })();
+                        const isRecursiveNamedUnion =
+                            propType instanceof UnionType &&
+                            this.namedUnions.has(propType) &&
+                            this.isRecursiveUnion(propType);
+                        if (
+                            isRecursiveNamedUnion &&
+                            p.isOptional &&
+                            removeNullFromUnion(propType, true)[0] !== null
+                        ) {
+                            cppType = this.cppType(
+                                propType,
+                                {
+                                    needsForwardIndirection: true,
+                                    needsOptionalIndirection: true,
+                                    inJsonNamespace: false,
+                                },
+                                false,
+                                true,
+                                true,
+                            );
+                            const propertyName =
+                                this._stringType.wrapEncodingChange(
+                                    [ourQualifier],
+                                    this._stringType.getType(),
+                                    this.NarrowString.getType(),
+                                    this._stringType.createStringLiteral([
+                                        stringEscape(json),
+                                    ]),
+                                );
+                            this.emitLine(
+                                assignment.wrap(
+                                    [],
+                                    [
+                                        "j.find(",
+                                        propertyName,
+                                        ") != j.end() ? j.at(",
+                                        propertyName,
+                                        ").get<",
+                                        cppType,
+                                        ">() : ",
+                                        cppType,
+                                        "()",
+                                    ],
+                                ),
+                                ";",
+                            );
+                            return;
+                        }
+
                         if (nullOrOptional) {
+                            const optionalTypes = isRecursiveNamedUnion
+                                ? new Set<Type>([propType])
+                                : typeSet;
                             cppType = this.cppTypeInOptional(
-                                typeSet,
+                                optionalTypes,
                                 {
                                     needsForwardIndirection: false,
                                     needsOptionalIndirection: false,
@@ -1433,7 +1656,7 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
                                 true,
                             );
                             toType = this.cppTypeInOptional(
-                                typeSet,
+                                optionalTypes,
                                 {
                                     needsForwardIndirection: false,
                                     needsOptionalIndirection: false,
@@ -1551,6 +1774,10 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
             false,
             () => {
                 this.emitLine("j = json::object();");
+                if (c.getProperties().size === 0) {
+                    this.emitLine("(void)x;");
+                }
+
                 this.forEachClassProperty(c, "none", (name, json, p) => {
                     const propType = p.type;
                     cppType = this.cppType(
@@ -1585,6 +1812,12 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
                         getter = [name];
                     }
 
+                    const value = this._stringType.wrapEncodingChange(
+                        [ourQualifier],
+                        cppType,
+                        toType,
+                        ["x.", getter],
+                    );
                     const assignment: Sourcelike[] = [
                         "j[",
                         this._stringType.wrapEncodingChange(
@@ -1596,31 +1829,17 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
                             ]),
                         ),
                         "] = ",
-                        this._stringType.wrapEncodingChange(
-                            [ourQualifier],
-                            cppType,
-                            toType,
-                            ["x.", getter],
-                        ),
+                        value,
                         ";",
                     ];
                     if (p.isOptional && this._options.hideNullOptional) {
-                        this.emitBlock(
-                            [
-                                "if (",
-                                this._stringType.wrapEncodingChange(
-                                    [ourQualifier],
-                                    cppType,
-                                    toType,
-                                    ["x.", getter],
-                                ),
-                                ")",
-                            ],
-                            false,
-                            () => {
-                                this.emitLine(assignment);
-                            },
-                        );
+                        const condition =
+                            propType.kind === "null" || propType.kind === "any"
+                                ? ["!", value, ".is_null()"]
+                                : value;
+                        this.emitBlock(["if (", condition, ")"], false, () => {
+                            this.emitLine(assignment);
+                        });
                     } else {
                         this.emitLine(assignment);
                     }
@@ -1657,12 +1876,66 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
     }
 
     protected emitUnionTypedefs(u: UnionType, unionName: Name): void {
+        const variantType = this.variantType(u, false);
+        if (!this.isRecursiveUnion(u)) {
+            this.emitLine("using ", unionName, " = ", variantType, ";");
+            return;
+        }
+
+        // A struct introduces its name before the base type is parsed, allowing
+        // recursion through containers such as std::vector.
+        this.emitBlock(["struct ", unionName, " : ", variantType], true, () => {
+            this.emitLine("using base = ", variantType, ";");
+            this.emitLine("using base::base;");
+            this.emitLine("using base::operator=;");
+        });
+    }
+
+    protected emitUnionWrapperHeaders(u: UnionType, unionName: Name): void {
+        if (!this.isRecursiveUnion(u)) return;
+
         this.emitLine(
-            "using ",
+            "void from_json(",
+            this.withConst("json"),
+            " & j, ",
             unionName,
-            " = ",
-            this.variantType(u, false),
-            ";",
+            " & x);",
+        );
+        this.emitLine(
+            "void to_json(json & j, ",
+            this.withConst(unionName),
+            " & x);",
+        );
+    }
+
+    protected emitUnionWrapperFunctions(u: UnionType, unionName: Name): void {
+        if (!this.isRecursiveUnion(u)) return;
+
+        this.emitBlock(
+            [
+                "inline void from_json(",
+                this.withConst("json"),
+                " & j, ",
+                unionName,
+                " & x)",
+            ],
+            false,
+            () => this.emitLine("x = j.get<", unionName, "::base>();"),
+        );
+        this.ensureBlankLine();
+        this.emitBlock(
+            [
+                "inline void to_json(json & j, ",
+                this.withConst(unionName),
+                " & x)",
+            ],
+            false,
+            () =>
+                this.emitLine(
+                    "j = static_cast<",
+                    this.withConst([unionName, "::base"]),
+                    " &>(x);",
+                ),
         );
     }
 
@@ -1716,6 +1989,8 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
             ["integer", "is_number_integer"],
             ["double", "is_number"],
             ["string", "is_string"],
+            ["uuid", "is_string"],
+            ["date-time", "is_string"],
             ["class", "is_object"],
             ["map", "is_object"],
             ["array", "is_array"],
@@ -1986,10 +2261,12 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
                         );
                         onFirst = false;
                     });
-                    this.emitLine(
-                        'else { throw std::runtime_error("Input JSON does not conform to schema!"); }',
-                    );
                 }
+                this.emitLine(
+                    'else { throw std::runtime_error("Cannot deserialize to enumeration \\"',
+                    enumName,
+                    '\\""); }',
+                );
             },
         );
         this.ensureBlankLine();
@@ -2131,8 +2408,14 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
                             ],
                             false,
                             () => {
+                                // A JSON null must become an *empty*
+                                // optional.  Only `optType<T>()` guarantees
+                                // that: the factory would wrap a
+                                // default-constructed T (std::make_optional
+                                // and std::make_shared both do), turning
+                                // null into 0/""/{} on round-trip.
                                 this.emitLine(
-                                    `if (j.is_null()) return ${factory}<T>(); else return ${factory}<T>(j.get<T>());`,
+                                    `if (j.is_null()) return ${optType}<T>(); else return ${factory}<T>(j.get<T>());`,
                                 );
                             },
                         );
@@ -2304,6 +2587,29 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
                     },
                 );
                 this.ensureBlankLine();
+            },
+        );
+        this.ensureBlankLine();
+
+        this.emitBlock(
+            [
+                "inline void ",
+                checkConst,
+                "(",
+                this._stringType.getConstType(),
+                " name, ",
+                this.withConst(classConstraint),
+                " & c, const ",
+                this._optionalType,
+                "<",
+                cppType,
+                "> & value)",
+            ],
+            false,
+            () => {
+                this.emitBlock(["if (value)"], false, () => {
+                    this.emitLine(checkConst, "(name, c, *value);");
+                });
             },
         );
         this.ensureBlankLine();
@@ -2586,6 +2892,29 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
                 this.ensureBlankLine();
             },
         );
+        this.ensureBlankLine();
+
+        this.emitBlock(
+            [
+                "inline void ",
+                checkConst,
+                "(",
+                this._stringType.getConstType(),
+                " name, ",
+                this.withConst(classConstraint),
+                " & c, const ",
+                this._optionalType,
+                "<",
+                this._stringType.getType(),
+                "> & value)",
+            ],
+            false,
+            () => {
+                this.emitBlock(["if (value)"], false, () => {
+                    this.emitLine(checkConst, "(name, c, *value);");
+                });
+            },
+        );
     }
 
     protected emitHelperFunctions(): void {
@@ -2787,6 +3116,15 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
             this.emitHelperFunctions();
         }
 
+        if (iterableSome(this.namedUnions, (u) => this.isRecursiveUnion(u))) {
+            this.forEachUnion("none", (u: UnionType, unionName: Name) => {
+                if (this.isRecursiveUnion(u)) {
+                    this.emitLine("struct ", unionName, ";");
+                }
+            });
+            this.ensureBlankLine();
+        }
+
         this.forEachDeclaration("interposing", (decl) =>
             this.emitDeclaration(decl),
         );
@@ -2809,6 +3147,12 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
             this.forEachEnum(
                 "leading-and-interposing",
                 (_: unknown, enumName: Name) => this.emitEnumHeaders(enumName),
+            );
+
+            this.forEachUnion(
+                "leading-and-interposing",
+                (u: UnionType, unionName: Name) =>
+                    this.emitUnionWrapperHeaders(u, unionName),
             );
         });
     }
@@ -2838,6 +3182,12 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
             "leading-and-interposing",
             (e: EnumType, enumName: Name) =>
                 this.emitEnumFunctions(e, enumName),
+        );
+
+        this.forEachUnion(
+            "leading-and-interposing",
+            (u: UnionType, unionName: Name) =>
+                this.emitUnionWrapperFunctions(u, unionName),
         );
     }
 
@@ -2980,12 +3330,10 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
                 if (maybeNull !== undefined) {
                     /** Houston this is a variant, include it */
                     propRecord.kind = IncludeKind.Include;
+                } else if (t.forceInclude) {
+                    propRecord.kind = IncludeKind.Include;
                 } else {
-                    if (t.forceInclude) {
-                        propRecord.kind = IncludeKind.Include;
-                    } else {
-                        propRecord.kind = IncludeKind.ForwardDeclare;
-                    }
+                    propRecord.kind = IncludeKind.ForwardDeclare;
                 }
             }
 
@@ -3029,7 +3377,7 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
             );
         }
 
-        if (includes.size !== 0) {
+        if (includes.size > 0) {
             let numForwards = 0;
             let numIncludes = 0;
             includes.forEach((rec: IncludeRecord, name: string) => {
@@ -3124,6 +3472,7 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
             this.emitHelper();
 
             this.startFile("Generators.hpp", true);
+            this._generatedFiles.add("Generators.hpp");
 
             this._allTypeNames.forEach((t) => {
                 this.emitInclude(false, [t, ".hpp"]);
@@ -3272,9 +3621,7 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
             return inner;
         }
 
-        public emitHelperFunctions(): void {
-            return;
-        }
+        public emitHelperFunctions(): void {}
     })();
 
     public WideString = new (class extends BaseString implements StringType {
@@ -3341,6 +3688,28 @@ export class CPlusPlusRenderer extends ConvenienceRenderer {
                     },
                 );
                 this.superThis.ensureBlankLine();
+
+                if (this.superThis.haveOptionalProperties) {
+                    this.superThis.emitLine(
+                        "template<typename TF, typename TT>",
+                    );
+                    this.superThis.emitBlock(
+                        [
+                            "static toType convert(tag<",
+                            this.superThis._optionalType,
+                            "<TF> >, tag<",
+                            this.superThis._optionalType,
+                            "<TT> >, fromType opt)",
+                        ],
+                        false,
+                        () => {
+                            this.superThis.emitLine(
+                                "if (!opt) return toType(); else return toType(Utf16_Utf8<TF,TT>::convert(*opt));",
+                            );
+                        },
+                    );
+                    this.superThis.ensureBlankLine();
+                }
 
                 this.superThis.emitLine("template<typename TF, typename TT>");
                 this.superThis.emitBlock(

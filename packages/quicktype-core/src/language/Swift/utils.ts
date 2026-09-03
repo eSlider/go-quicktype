@@ -1,6 +1,6 @@
-import { DefaultDateTimeRecognizer } from "../../DateTime";
-import type { Name } from "../../Naming";
-import type { ForEachPosition } from "../../Renderer";
+import { DefaultDateTimeRecognizer } from "../../DateTime.js";
+import type { Name } from "../../Naming.js";
+import type { ForEachPosition } from "../../Renderer.js";
 import {
     addPrefixIfNecessary,
     allLowerWordStyle,
@@ -16,8 +16,8 @@ import {
     legalizeCharacters,
     splitIntoWords,
     utf32ConcatMap,
-} from "../../support/Strings";
-import type { ClassProperty } from "../../Type";
+} from "../../support/Strings.js";
+import type { ClassProperty } from "../../Type/index.js";
 
 export const MAX_SAMELINE_PROPERTIES = 4;
 
@@ -32,7 +32,8 @@ export const MAX_SAMELINE_PROPERTIES = 4;
 // 2018-08-14T02:45:50z
 // 2018-00008-1T002:45:3Z
 
-const swiftDateTimeRegex = /^\d+-\d+-\d+T\d+:\d+:\d+([zZ]|[+-]\d+(:\d+)?)$/;
+const swiftDateTimeRegex =
+    /^\d+-\d+-\d+T\d+:\d+:\d+(?:\.\d+)?([zZ]|[+-]\d+(:\d+)?)$/;
 
 export class SwiftDateTimeRecognizer extends DefaultDateTimeRecognizer {
     public isDateTime(str: string): boolean {
@@ -69,7 +70,7 @@ export function swiftNameStyle(
         legalizeName,
         isUpper ? firstUpperWordStyle : allLowerWordStyle,
         firstUpperWordStyle,
-        isUpper ? allUpperWordStyle : allLowerWordStyle,
+        isUpper ? acronymsStyle : allLowerWordStyle,
         acronymsStyle,
         "",
         isStartCharacter,
@@ -78,7 +79,7 @@ export function swiftNameStyle(
 }
 
 function unicodeEscape(codePoint: number): string {
-    return "\\u{" + intToHex(codePoint, 0) + "}";
+    return `\\u{${intToHex(codePoint, 0)}}`;
 }
 
 export const stringEscape = utf32ConcatMap(

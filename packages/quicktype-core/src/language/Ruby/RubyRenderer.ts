@@ -1,13 +1,19 @@
 import {
     ConvenienceRenderer,
     type ForbiddenWordsInfo,
-} from "../../ConvenienceRenderer";
-import { type Name, Namer } from "../../Naming";
-import type { RenderContext } from "../../Renderer";
-import type { OptionValues } from "../../RendererOptions";
-import { type Sourcelike, modifySource } from "../../Source";
-import { snakeCase } from "../../support/Strings";
-import type { TargetLanguage } from "../../TargetLanguage";
+} from "../../ConvenienceRenderer.js";
+import {
+    minMaxItemsForType,
+    minMaxLengthForType,
+    minMaxValueForType,
+    patternForType,
+} from "../../attributes/Constraints.js";
+import { type Name, Namer } from "../../Naming.js";
+import type { RenderContext } from "../../Renderer.js";
+import type { OptionValues } from "../../RendererOptions/index.js";
+import { type Sourcelike, modifySource } from "../../Source.js";
+import { snakeCase } from "../../support/Strings.js";
+import type { TargetLanguage } from "../../TargetLanguage.js";
 import {
     ArrayType,
     type ClassProperty,
@@ -16,22 +22,22 @@ import {
     MapType,
     type Type,
     type UnionType,
-} from "../../Type";
+} from "../../Type/index.js";
 import {
     matchType,
     nullableFromUnion,
     removeNullFromUnion,
-} from "../../Type/TypeUtils";
+} from "../../Type/TypeUtils.js";
 
-import { globals } from "./constants";
-import type { rubyOptions } from "./language";
+import { globals } from "./constants.js";
+import type { rubyOptions } from "./language.js";
 import {
     Strictness,
     forbiddenForObjectProperties,
     memberNameStyle,
     simpleNameStyle,
     stringEscape,
-} from "./utils";
+} from "./utils.js";
 
 export class RubyRenderer extends ConvenienceRenderer {
     public constructor(
@@ -51,7 +57,7 @@ export class RubyRenderer extends ConvenienceRenderer {
     }
 
     protected canBeForwardDeclared(t: Type): boolean {
-        return "class" === t.kind;
+        return t.kind === "class";
     }
 
     protected forbiddenNamesForGlobalNamespace(): readonly string[] {
@@ -68,6 +74,16 @@ export class RubyRenderer extends ConvenienceRenderer {
     protected forbiddenForObjectProperties(
         _c: ClassType,
         _classNamed: Name,
+    ): ForbiddenWordsInfo {
+        return {
+            names: forbiddenForObjectProperties,
+            includeGlobalForbidden: true,
+        };
+    }
+
+    protected forbiddenForUnionMembers(
+        _u: UnionType,
+        _unionNamed: Name,
     ): ForbiddenWordsInfo {
         return {
             names: forbiddenForObjectProperties,
@@ -93,18 +109,60 @@ export class RubyRenderer extends ConvenienceRenderer {
 
     private dryType(t: Type, isOptional = false): Sourcelike {
         const optional = isOptional ? ".optional" : "";
+        const pattern = (type: Type): Sourcelike => {
+            const regex = patternForType(type);
+            return regex === undefined
+                ? ""
+                : `.constrained(format: Regexp.new("${stringEscape(regex)}"))`;
+        };
+        const cardinality = (type: Type): string => {
+            const [min, max] = minMaxItemsForType(type) ?? [];
+            const constraints = [
+                min === undefined ? undefined : `min_size: ${min}`,
+                max === undefined ? undefined : `max_size: ${max}`,
+            ].filter((x): x is string => x !== undefined);
+            return constraints.length === 0
+                ? ""
+                : `.constrained(${constraints.join(", ")})`;
+        };
+        const minMax = (type: Type): string => {
+            const [min, max] = minMaxValueForType(type) ?? [];
+            const constraints = [
+                min === undefined ? undefined : `gteq: ${min}`,
+                max === undefined ? undefined : `lteq: ${max}`,
+            ].filter((x): x is string => x !== undefined);
+            return constraints.length === 0
+                ? ""
+                : `.constrained(${constraints.join(", ")})`;
+        };
+        const length = (type: Type): string => {
+            const [min, max] = minMaxLengthForType(type) ?? [];
+            const constraints = [
+                min === undefined ? undefined : `min_size: ${min}`,
+                max === undefined ? undefined : `max_size: ${max}`,
+            ].filter((x): x is string => x !== undefined);
+            return constraints.length === 0
+                ? ""
+                : `.constrained(${constraints.join(", ")})`;
+        };
         return matchType<Sourcelike>(
             t,
             (_anyType) => ["Types::Any", optional],
             (_nullType) => ["Types::Nil", optional],
             (_boolType) => ["Types::Bool", optional],
-            (_integerType) => ["Types::Integer", optional],
-            (_doubleType) => ["Types::Double", optional],
-            (_stringType) => ["Types::String", optional],
+            (integerType) => ["Types::Integer", minMax(integerType), optional],
+            (doubleType) => ["Types::Double", minMax(doubleType), optional],
+            (stringType) => [
+                "Types::String",
+                length(stringType),
+                pattern(stringType),
+                optional,
+            ],
             (arrayType) => [
                 "Types.Array(",
                 this.dryType(arrayType.items),
                 ")",
+                cardinality(arrayType),
                 optional,
             ],
             (classType) => [this.nameForNamedType(classType), optional],
@@ -132,6 +190,12 @@ export class RubyRenderer extends ConvenienceRenderer {
                     optional,
                 ];
             },
+            (transformed) => [
+                transformed.kind === "uuid"
+                    ? "Types::String.constrained(format: /\\A[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\\z/i)"
+                    : "Types::String.constrained(format: /\\A\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d+)?(?:Z|[+-]\\d\\d:\\d\\d)\\z/i)",
+                optional,
+            ],
         );
     }
 
@@ -221,6 +285,7 @@ export class RubyRenderer extends ConvenienceRenderer {
 
                 return exp;
             },
+            (_transformed) => exp,
         );
     }
 
@@ -310,6 +375,7 @@ export class RubyRenderer extends ConvenienceRenderer {
                 ];
                 return optional ? [e, " ? ", expression, " : nil"] : expression;
             },
+            (_transformed) => primitive,
         );
     }
 
@@ -354,6 +420,7 @@ export class RubyRenderer extends ConvenienceRenderer {
 
                 return [e, optional ? "&" : "", ".to_dynamic"];
             },
+            (_transformed) => e,
         );
     }
 
@@ -378,6 +445,7 @@ export class RubyRenderer extends ConvenienceRenderer {
 
                 return false;
             },
+            (_transformed) => true,
         );
     }
 
@@ -409,6 +477,7 @@ export class RubyRenderer extends ConvenienceRenderer {
 
                 return false;
             },
+            (_transformed) => true,
         );
     }
 
@@ -612,7 +681,11 @@ export class RubyRenderer extends ConvenienceRenderer {
                             .map((memberName) => [", ", memberName, ": nil"]);
                         if (this.propertyTypeMarshalsImplicitlyFromDynamic(t)) {
                             this.emitBlock(
-                                ["if schema[:", name, "].right.valid? d"],
+                                [
+                                    "if schema.key(:",
+                                    name,
+                                    ").type.right.valid? d",
+                                ],
                                 () => {
                                     this.emitLine(
                                         "return new(",
@@ -632,9 +705,9 @@ export class RubyRenderer extends ConvenienceRenderer {
                                 );
                                 this.emitBlock(
                                     [
-                                        "if schema[:",
+                                        "if schema.key(:",
                                         name,
-                                        "].right.valid? value",
+                                        ").type.right.valid? value",
                                     ],
                                     () => {
                                         this.emitLine(
@@ -732,13 +805,11 @@ export class RubyRenderer extends ConvenienceRenderer {
                         ["Integer"],
                         [` = ${this._options.strictness}Integer`],
                     ]);
-                if (this._options.strictness === Strictness.Strict) {
-                    if (has.nil)
-                        declarations.push([
-                            ["Nil"],
-                            [` = ${this._options.strictness}Nil`],
-                        ]);
-                }
+                if (this._options.strictness === Strictness.Strict && has.nil)
+                    declarations.push([
+                        ["Nil"],
+                        [` = ${this._options.strictness}Nil`],
+                    ]);
 
                 if (has.bool)
                     declarations.push([
@@ -863,7 +934,9 @@ export class RubyRenderer extends ConvenienceRenderer {
 
                         // The json gem defines to_json on maps and primitives, so we only need to supply
                         // it for arrays.
-                        const needsToJsonDefined = "array" === topLevel.kind;
+                        const needsToJsonDefined =
+                            topLevel instanceof ArrayType &&
+                            !topLevel.items.isPrimitive();
 
                         const classDeclaration = (): void => {
                             this.emitBlock(["class ", name], () => {

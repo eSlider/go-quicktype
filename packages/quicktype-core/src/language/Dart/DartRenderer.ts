@@ -1,39 +1,45 @@
 import {
     anyTypeIssueAnnotation,
     nullTypeIssueAnnotation,
-} from "../../Annotation";
+} from "../../Annotation.js";
+import {
+    minMaxItemsForType,
+    minMaxLengthForType,
+    minMaxValueForType,
+    patternForType,
+} from "../../attributes/Constraints.js";
 import {
     ConvenienceRenderer,
     type ForbiddenWordsInfo,
-} from "../../ConvenienceRenderer";
-import { DependencyName, type Name, type Namer } from "../../Naming";
-import type { RenderContext } from "../../Renderer";
-import type { OptionValues } from "../../RendererOptions";
-import { type Sourcelike, maybeAnnotated, modifySource } from "../../Source";
-import { decapitalize, snakeCase } from "../../support/Strings";
-import { defined } from "../../support/Support";
-import type { TargetLanguage } from "../../TargetLanguage";
+} from "../../ConvenienceRenderer.js";
+import { DependencyName, type Name, type Namer } from "../../Naming.js";
+import type { RenderContext } from "../../Renderer.js";
+import type { OptionValues } from "../../RendererOptions/index.js";
+import { type Sourcelike, maybeAnnotated, modifySource } from "../../Source.js";
+import { decapitalize, snakeCase } from "../../support/Strings.js";
+import { defined } from "../../support/Support.js";
+import type { TargetLanguage } from "../../TargetLanguage.js";
 import {
     type ClassProperty,
     type ClassType,
     EnumType,
     type Type,
     type UnionType,
-} from "../../Type";
+} from "../../Type/index.js";
 import {
     directlyReachableSingleNamedType,
     matchType,
     nullableFromUnion,
-} from "../../Type/TypeUtils";
+} from "../../Type/TypeUtils.js";
 
-import { keywords } from "./constants";
-import type { dartOptions } from "./language";
+import { keywords } from "./constants.js";
+import type { dartOptions } from "./language.js";
 import {
     enumCaseNamingFunction,
     propertyNamingFunction,
     stringEscape,
     typeNamingFunction,
-} from "./utils";
+} from "./utils.js";
 
 interface TopLevelDependents {
     decoder: Name;
@@ -117,12 +123,12 @@ export class DartRenderer extends ConvenienceRenderer {
         const encoder = new DependencyName(
             propertyNamingFunction,
             name.order,
-            (lookup) => `${lookup(name)}_${this.toJson}`,
+            (lookup) => `${lookup(name)}_toJson`,
         );
         const decoder = new DependencyName(
             propertyNamingFunction,
             name.order,
-            (lookup) => `${lookup(name)}_${this.fromJson}`,
+            (lookup) => `${lookup(name)}_fromJson`,
         );
         this._topLevelDependents.set(name, { encoder, decoder });
         return [encoder, decoder];
@@ -266,9 +272,7 @@ export class DartRenderer extends ConvenienceRenderer {
     ): Sourcelike {
         const nullable =
             forceNullable ||
-            (this._options.nullSafety &&
-                t.isNullable &&
-                !this._options.requiredProperties);
+            (t.isNullable && !this._options.requiredProperties);
         const withNullable = (s: Sourcelike): Sourcelike =>
             nullable ? [s, "?"] : s;
         return matchType<Sourcelike>(
@@ -315,39 +319,30 @@ export class DartRenderer extends ConvenienceRenderer {
         );
     }
 
+    // biome-ignore format: keep the constraint wrapper compact
     protected mapList(
         isNullable: boolean,
         itemType: Sourcelike,
         list: Sourcelike,
         mapper: Sourcelike,
+        constrained?: Type,
     ): Sourcelike {
-        if (
-            this._options.nullSafety &&
-            isNullable &&
-            !this._options.requiredProperties
-        ) {
+        const [min, max] = constrained === undefined ? [undefined, undefined] : (minMaxItemsForType(constrained) ?? []);
+        const checked = (value: Sourcelike): Sourcelike =>
+            min === undefined && max === undefined ? value : [
+                "(() { final x = ", value, "; if (",
+                [min !== undefined && `x.length < ${min}`, max !== undefined && `x.length > ${max}`].filter(Boolean).join(" || "),
+                ") throw FormatException('Invalid array length'); return x; })()",
+            ];
+        if (isNullable && !this._options.requiredProperties) {
             return [
                 list,
-                " == null ? [] : ",
-                "List<",
-                itemType,
-                ">.from(",
-                list,
-                "!.map((x) => ",
-                mapper,
-                "))",
+                " == null ? null : ",
+                checked(["List<", itemType, ">.from(", list, "!.map((x) => ", mapper, "))"]),
             ];
         }
 
-        return [
-            "List<",
-            itemType,
-            ">.from(",
-            list,
-            ".map((x) => ",
-            mapper,
-            "))",
-        ];
+        return checked(["List<", itemType, ">.from(", list, ".map((x) => ", mapper, "))"]);
     }
 
     protected mapMap(
@@ -356,12 +351,10 @@ export class DartRenderer extends ConvenienceRenderer {
         map: Sourcelike,
         valueMapper: Sourcelike,
     ): Sourcelike {
-        if (
-            this._options.nullSafety &&
-            isNullable &&
-            !this._options.requiredProperties
-        ) {
+        if (isNullable && !this._options.requiredProperties) {
             return [
+                map,
+                " == null ? null : ",
                 "Map.from(",
                 map,
                 "!).map((k, v) => MapEntry<String, ",
@@ -388,11 +381,7 @@ export class DartRenderer extends ConvenienceRenderer {
         classType: ClassType,
         dynamic: Sourcelike,
     ): Sourcelike {
-        if (
-            this._options.nullSafety &&
-            isNullable &&
-            !this._options.requiredProperties
-        ) {
+        if (isNullable && !this._options.requiredProperties) {
             return [
                 dynamic,
                 " == null ? null : ",
@@ -419,23 +408,67 @@ export class DartRenderer extends ConvenienceRenderer {
     // If the first time is the unionType type, after nullableFromUnion conversion,
     // the isNullable property will become false, which is obviously wrong,
     // so add isNullable property
-    // eslint-disable-next-line @typescript-eslint/default-param-last
     protected fromDynamicExpression(
+        // biome-ignore lint/style/useDefaultParameterLast: part of the exported DartRenderer API; removing the default would break downstream subclasses
         isNullable = false,
         t: Type,
         ...dynamic: Sourcelike[]
     ): Sourcelike {
+        const validateString = (type: Type, value: Sourcelike): Sourcelike => {
+            const [min, max] = minMaxLengthForType(type) ?? [];
+            if (min === undefined && max === undefined) return value;
+            return [
+                isNullable ? [value, " == null ? null : "] : [],
+                "((x) => ",
+                min === undefined ? "true" : `x.length >= ${min}`,
+                " && ",
+                max === undefined ? "true" : `x.length <= ${max}`,
+                ' ? x : throw FormatException("Expected bounded string"))(',
+                value,
+                ")",
+            ];
+        };
+        const validatePattern = (type: Type, value: Sourcelike): Sourcelike => {
+            const pattern = patternForType(type);
+            if (pattern === undefined) return value;
+            const checked: Sourcelike = [
+                '((x) => RegExp("',
+                stringEscape(pattern),
+                '").hasMatch(x) ? x : throw FormatException("Expected matching string"))(',
+                value,
+                ")",
+            ];
+            return isNullable
+                ? [value, " == null ? null : ", checked]
+                : checked;
+        };
+        const validateNumber = (type: Type, value: Sourcelike): Sourcelike => {
+            const [min, max] = minMaxValueForType(type) ?? [];
+            if (min === undefined && max === undefined) return value;
+            return [
+                isNullable ? [value, " == null ? null : "] : [],
+                "((x) => ",
+                min === undefined ? "true" : `x >= ${min}`,
+                " && ",
+                max === undefined ? "true" : `x <= ${max}`,
+                ' ? x : throw FormatException("Expected bounded number"))(',
+                value,
+                ")",
+            ];
+        };
         return matchType<Sourcelike>(
             t,
             (_anyType) => dynamic,
             (_nullType) => dynamic, // FIXME: check null
             (_boolType) => dynamic,
-            (_integerType) => dynamic,
-            (_doubleType) => [
-                dynamic,
-                this._options.nullSafety ? "?.toDouble()" : ".toDouble()",
-            ],
-            (_stringType) => dynamic,
+            (integerType) => validateNumber(integerType, dynamic),
+            (doubleType) =>
+                validateNumber(doubleType, [dynamic, "?.toDouble()"]),
+            (stringType) =>
+                validatePattern(
+                    stringType,
+                    validateString(stringType, dynamic),
+                ),
             (arrayType) =>
                 this.mapList(
                     isNullable || arrayType.isNullable,
@@ -446,6 +479,7 @@ export class DartRenderer extends ConvenienceRenderer {
                         arrayType.items,
                         "x",
                     ),
+                    arrayType,
                 ),
             (classType) =>
                 this.mapClass(
@@ -465,12 +499,15 @@ export class DartRenderer extends ConvenienceRenderer {
                     ),
                 ),
             (enumType) => {
-                return [
+                const value: Sourcelike = [
                     defined(this._enumValues.get(enumType)),
                     ".map[",
                     dynamic,
-                    this._options.nullSafety ? "]!" : "]",
+                    "]!",
                 ];
+                return isNullable && !this._options.requiredProperties
+                    ? [dynamic, " == null ? null : ", value]
+                    : value;
             },
             (unionType) => {
                 const maybeNullable = nullableFromUnion(unionType);
@@ -490,8 +527,7 @@ export class DartRenderer extends ConvenienceRenderer {
                     case "date":
                         if (
                             (transformedStringType.isNullable || isNullable) &&
-                            !this._options.requiredProperties &&
-                            this._options.nullSafety
+                            !this._options.requiredProperties
                         ) {
                             return [
                                 dynamic,
@@ -514,8 +550,8 @@ export class DartRenderer extends ConvenienceRenderer {
     // If the first time is the unionType type, after nullableFromUnion conversion,
     // the isNullable property will become false, which is obviously wrong,
     // so add isNullable property
-    // eslint-disable-next-line @typescript-eslint/default-param-last
     protected toDynamicExpression(
+        // biome-ignore lint/style/useDefaultParameterLast: part of the exported DartRenderer API; removing the default would break downstream subclasses
         isNullable = false,
         t: Type,
         ...dynamic: Sourcelike[]
@@ -541,7 +577,6 @@ export class DartRenderer extends ConvenienceRenderer {
                 ),
             (_classType) => {
                 if (
-                    this._options.nullSafety &&
                     (_classType.isNullable || isNullable) &&
                     !this._options.requiredProperties
                 ) {
@@ -585,7 +620,6 @@ export class DartRenderer extends ConvenienceRenderer {
                 switch (transformedStringType.kind) {
                     case "date-time":
                         if (
-                            this._options.nullSafety &&
                             !this._options.requiredProperties &&
                             (transformedStringType.isNullable || isNullable)
                         ) {
@@ -595,12 +629,12 @@ export class DartRenderer extends ConvenienceRenderer {
                         return [dynamic, ".toIso8601String()"];
                     case "date":
                         if (
-                            this._options.nullSafety &&
                             !this._options.requiredProperties &&
                             (transformedStringType.isNullable || isNullable)
                         ) {
                             return [
-                                '"${',
+                                dynamic,
+                                ' == null ? null : "${',
                                 dynamic,
                                 "!.year.toString().padLeft(4, '0')",
                                 "}-${",
@@ -638,8 +672,8 @@ export class DartRenderer extends ConvenienceRenderer {
             this.forEachClassProperty(c, "none", (name, _, prop) => {
                 const required =
                     this._options.requiredProperties ||
-                    (this._options.nullSafety &&
-                        (!prop.type.isNullable || !prop.isOptional));
+                    !prop.type.isNullable ||
+                    !prop.isOptional;
                 this.emitLine(required ? "required " : "", "this.", name, ",");
             });
         });
@@ -836,64 +870,71 @@ export class DartRenderer extends ConvenienceRenderer {
         this.emitDescription(this.descriptionForType(c));
 
         this.emitLine("@freezed");
-        this.emitBlock(["class ", className, " with _$", className], () => {
-            if (c.getProperties().size === 0) {
-                this.emitLine(
-                    "const factory ",
-                    className,
-                    "() = _",
-                    className,
-                    ";",
-                );
-            } else {
-                this.emitLine("const factory ", className, "({");
-                this.indent(() => {
-                    this.forEachClassProperty(
-                        c,
-                        "none",
-                        (name, jsonName, prop) => {
-                            const description =
-                                this.descriptionForClassProperty(c, jsonName);
-                            if (description !== undefined) {
-                                this.emitDescription(description);
-                            }
-
-                            const required =
-                                this._options.requiredProperties ||
-                                (this._options.nullSafety &&
-                                    (!prop.type.isNullable ||
-                                        !prop.isOptional));
-                            if (this._options.useJsonAnnotation) {
-                                this.classPropertyCounter++;
-                                this.emitLine(`@JsonKey(name: "${jsonName}")`);
-                            }
-
-                            this.emitLine(
-                                required ? "required " : "",
-                                this.dartType(prop.type, true),
-                                " ",
-                                name,
-                                ",",
-                            );
-                        },
+        this.emitBlock(
+            ["abstract class ", className, " with _$", className],
+            () => {
+                if (c.getProperties().size === 0) {
+                    this.emitLine(
+                        "const factory ",
+                        className,
+                        "() = _",
+                        className,
+                        ";",
                     );
-                });
-                this.emitLine("}) = _", className, ";");
-            }
+                } else {
+                    this.emitLine("const factory ", className, "({");
+                    this.indent(() => {
+                        this.forEachClassProperty(
+                            c,
+                            "none",
+                            (name, jsonName, prop) => {
+                                const description =
+                                    this.descriptionForClassProperty(
+                                        c,
+                                        jsonName,
+                                    );
+                                if (description !== undefined) {
+                                    this.emitDescription(description);
+                                }
 
-            if (this._options.justTypes) return;
+                                const required =
+                                    this._options.requiredProperties ||
+                                    !prop.type.isNullable ||
+                                    !prop.isOptional;
+                                if (this._options.useJsonAnnotation) {
+                                    this.classPropertyCounter++;
+                                    this.emitLine(
+                                        `@JsonKey(name: "${jsonName}")`,
+                                    );
+                                }
 
-            this.ensureBlankLine();
-            this.emitLine(
-                // factory PublicAnswer.fromJson(Map<String, dynamic> json) => _$PublicAnswerFromJson(json);
-                "factory ",
-                className,
-                ".fromJson(Map<String, dynamic> json) => ",
-                "_$",
-                className,
-                "FromJson(json);",
-            );
-        });
+                                this.emitLine(
+                                    required ? "required " : "",
+                                    this.dartType(prop.type, true),
+                                    " ",
+                                    name,
+                                    ",",
+                                );
+                            },
+                        );
+                    });
+                    this.emitLine("}) = _", className, ";");
+                }
+
+                if (this._options.justTypes) return;
+
+                this.ensureBlankLine();
+                this.emitLine(
+                    // factory PublicAnswer.fromJson(Map<String, dynamic> json) => _$PublicAnswerFromJson(json);
+                    "factory ",
+                    className,
+                    ".fromJson(Map<String, dynamic> json) => ",
+                    "_$",
+                    className,
+                    "FromJson(json);",
+                );
+            },
+        );
     }
 
     protected emitEnumDefinition(e: EnumType, enumName: Name): void {

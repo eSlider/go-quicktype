@@ -18,7 +18,7 @@
         "build:app": "bun scripts/build.ts"
     },
     "dependencies": {
-        "quicktype-core": "file:../quicktype-core",
-        "quicktype-graphql-input": "file:../quicktype-graphql-input"
+        "quicktype-core": "24.0.0",
+        "quicktype-graphql-input": "24.0.0"
     }
 }

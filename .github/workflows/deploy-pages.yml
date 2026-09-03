@@ -40,7 +40,7 @@ jobs:
                   npm run build --workspace=packages/quicktype-graphql-input
             - name: Inject app version
               run: echo "APP_VERSION=$(jq -r .version package.json)" >> "$GITHUB_ENV"
-            - run: bun run build
+            - run: bun run build:app
               working-directory: packages/web
             - uses: actions/upload-pages-artifact@v3
               with:

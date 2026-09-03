@@ -33,7 +33,7 @@
         "lint": "biome check .",
         "lint:fix": "biome check --write .",
         "dev:web": "cd packages/web && bun run dev",
-        "build:web": "npm run build --workspace=packages/quicktype-core && npm run build --workspace=packages/quicktype-graphql-input && cd packages/web && bun run build"
+        "build:web": "npm run build --workspace=packages/quicktype-core && npm run build --workspace=packages/quicktype-graphql-input && cd packages/web && bun run build:app"
     },
     "workspaces": [
         "./packages/quicktype-core",
